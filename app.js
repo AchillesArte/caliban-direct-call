@@ -30,6 +30,9 @@
   let resolvingEndpoint = false;
   let hiddenAt = 0;
   let lastResumeAt = 0;
+  let endpointRefreshMode = false;
+  let githubEndpointCheckedAt = 0;
+  let githubSignalUrl = '';
   let ringTimer = null;
   let durationTimer = null;
   let reconnectAttempts = 0;
@@ -436,16 +439,39 @@
     // current gateway after a temporary tunnel rotates. No pairing key lives
     // in endpoint.json, and the phone's localStorage survives every rotation.
     if (!location.hostname.endsWith('.github.io')) return localAddress;
+    const checkedAddress = value => {
+      const address = new URL(value);
+      if (address.protocol !== 'wss:' || address.username || address.password || address.search || address.hash ||
+          address.pathname !== '/ws' || !address.hostname.endsWith('.trycloudflare.com')) {
+        throw new Error('The published calling address is invalid.');
+      }
+      return address.href;
+    };
+    // GitHub Pages may publish a changed endpoint several minutes after the
+    // repository has already received it. After a failed socket connection,
+    // read the same public JSON straight from GitHub until Pages catches up.
+    if (endpointRefreshMode) {
+      if (!githubEndpointCheckedAt || Date.now() - githubEndpointCheckedAt > 60000) {
+        githubEndpointCheckedAt = Date.now();
+        try {
+          const url = 'https://api.github.com/repos/AchillesArte/caliban-direct-call/contents/endpoint.json?ref=main';
+          const response = await fetch(url, { cache: 'no-store', credentials: 'omit' });
+          if (!response.ok) throw new Error('Endpoint repository unavailable');
+          const payload = await response.json();
+          const json = JSON.parse(atob(String(payload.content || '').replace(/\s+/g, '')));
+          githubSignalUrl = checkedAddress(json.signal_url);
+        } catch (error) {
+          console.warn('Caliban live address lookup failed; using published address', error);
+          githubSignalUrl = '';
+        }
+      }
+      if (githubSignalUrl) return githubSignalUrl;
+    }
     const url = new URL(`./endpoint.json?refresh=${Date.now()}`, location.href);
     const response = await fetch(url, {cache: 'no-store', credentials: 'omit'});
     if (!response.ok) throw new Error('The desktop address book is unavailable. Retry when it is online.');
     const data = await response.json();
-    const address = new URL(data.signal_url);
-    if (address.protocol !== 'wss:' || address.username || address.password || address.search || address.hash ||
-        address.pathname !== '/ws' || !address.hostname.endsWith('.trycloudflare.com')) {
-      throw new Error('The published calling address is invalid.');
-    }
-    return address.href;
+    return checkedAddress(data.signal_url);
   }
 
   async function connect() {
@@ -509,6 +535,7 @@
         forgetToken();
         updateDisplay();
       } else if (token) {
+        endpointRefreshMode = true;
         reconnectAttempts += 1;
         const delay = Math.min(15000, 700 * (2 ** Math.min(reconnectAttempts, 5)));
         reconnectTimer = setTimeout(connect, delay);
