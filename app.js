@@ -42,7 +42,6 @@
   // This paired phone is the owner's personal lifelog device. Recording
   // requests originate from the paired desktop and are accepted for a call
   // without prompting again. An active recording remains plainly indicated.
-  let recordingConsent = false;
   let socketReady = false;
   let connectedAt = 0;
   let callPhase = 'idle'; // idle | preparing | ringing | negotiating | connected
@@ -412,7 +411,6 @@
       ui.recordingNotice.textContent = 'Lifelogging active: audio transcription and video stills are saved to the desktop.';
     } else {
       ui.captionStatus.textContent = 'Transcription is off. Earlier captions remain until the next call.';
-      recordingConsent = false;
     }
     updateDisplay();
   }
@@ -567,7 +565,6 @@
         // Only an authenticated desktop can request this through the gateway.
         // Reject recording requests outside an active call.
         const accepted = callPhase !== 'idle';
-        recordingConsent = accepted;
         send({ type: 'record_consent', consent: accepted });
         updateDisplay();
         break;
@@ -782,7 +779,6 @@
   async function callDesktop() {
     if (!socketReady || !desktopOnline || callPhase !== 'idle') return;
     displayError('');
-    recordingConsent = false;
     const currentSession = ++sessionNumber;
     callPhase = 'preparing';
     updateDisplay();
@@ -862,7 +858,6 @@
     cameraDisabled = false;
     microphoneMuted = false;
     audioOnly = false;
-    recordingConsent = false;
     callPhase = 'idle';
     updateControls();
     updateDisplay();
