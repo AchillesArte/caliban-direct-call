@@ -25,6 +25,7 @@
     captionStatus: $('captionStatus'), captionList: $('captionList'),
     captionPlaceholder: $('captionPlaceholder'), copyCaptions: $('copyCaptions'),
     glassesPanel: $('glassesPanel'), glassesButton: $('glassesButton'), glassesConnect: $('glassesConnect'), glassesStatus: $('glassesStatus'),
+    glassesRecovery: $('glassesRecovery'), cameraSourceLabel: $('cameraSourceLabel'),
   };
 
   let token = '';
@@ -100,8 +101,10 @@
   function updateGlassesButton() {
     if (!nativeGlasses) return;
     ui.glassesButton.setAttribute('aria-pressed', String(glassesRequested));
-    ui.glassesButton.textContent = glassesRequested ? 'Use iPhone camera' : 'Use Meta glasses camera';
+    ui.glassesButton.textContent = glassesRequested ? 'Use iPhone camera'
+      : glassesStatus === 'error' ? 'Retry Meta glasses camera' : 'Use Meta glasses camera';
     ui.glassesButton.disabled = glassesStatus === 'connecting';
+    ui.glassesRecovery.hidden = glassesStatus !== 'error';
     ui.flipButton.disabled = glassesRequested || !localStream || cameraDisabled || localStream.getVideoTracks().length === 0;
   }
 
@@ -132,12 +135,17 @@
     ui.localVideo.classList.add('back-camera');
     void ui.localVideo.play().catch(() => {});
     glassesActive = true;
+    ui.cameraSourceLabel.textContent = 'META GLASSES';
     glassesInfo('Meta glasses camera selected for Caliban still images. Your iPhone microphone remains active.');
     updateDisplay();
   }
 
   async function usePhoneTrack() {
-    if (!glassesActive || !localStream) { glassesActive = false; return; }
+    if (!glassesActive || !localStream) {
+      glassesActive = false;
+      ui.cameraSourceLabel.textContent = 'PHONE CAMERA';
+      return;
+    }
     let replacement = phoneCameraTrack?.readyState === 'live' ? phoneCameraTrack : null;
     if (!replacement) {
       try {
@@ -156,6 +164,7 @@
     if (glassesTrack && localStream.getTracks().includes(glassesTrack)) localStream.removeTrack(glassesTrack);
     if (replacement && !localStream.getTracks().includes(replacement)) localStream.addTrack(replacement);
     glassesActive = false;
+    ui.cameraSourceLabel.textContent = 'PHONE CAMERA';
     ui.localVideo.srcObject = localStream;
     ui.localVideo.classList.toggle('back-camera', cameraFacing === 'environment');
     void ui.localVideo.play().catch(() => {});
@@ -239,6 +248,7 @@
     if (glassesRequested) { void disableGlasses(); return; }
     glassesRequested = true;
     glassesStatus = 'connecting';
+    ui.glassesRecovery.hidden = true;
     glassesInfo('Connecting to the Meta glasses through the Meta AI app…');
     updateGlassesButton();
     if (!postGlasses('start')) {
@@ -938,6 +948,7 @@
     glassesTrack = null;
     glassesCanvas = null;
     glassesActive = false;
+    ui.cameraSourceLabel.textContent = 'PHONE CAMERA';
     glassesRequested = false;
     glassesStatus = 'idle';
     postGlasses('stop');

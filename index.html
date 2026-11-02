@@ -25,7 +25,7 @@
       <video id="remoteVideo" class="remote-video" autoplay playsinline aria-hidden="true"></video>
       <div class="stage-art" aria-hidden="true"><div class="circle"><svg viewBox="0 0 64 64"><path d="M16 19h32v26H16z M26 19v-6h12v6 M25 45v7 M39 45v7 M24 29h16 M24 35h16"/></svg></div></div>
       <div class="stage-top">
-        <span class="glass-chip"><svg viewBox="0 0 24 24"><path d="M4 17v-9l8-5 8 5v9l-8 5z M9 12l3 3 5-6"/></svg> PHONE CAMERA</span>
+        <span class="glass-chip"><svg viewBox="0 0 24 24"><path d="M4 17v-9l8-5 8 5v9l-8 5z M9 12l3 3 5-6"/></svg> <span id="cameraSourceLabel">PHONE CAMERA</span></span>
         <span class="glass-chip recording" id="recordingChip" hidden><span class="record-dot"></span> SAVING STILLS</span>
       </div>
       <div class="stage-center" id="stageCenter"><h2 id="stageTitle">Phone camera standby</h2><p id="stageMessage">Pair your iPhone, then start a call to capture audio and periodic camera stills.</p></div>
@@ -51,6 +51,11 @@
         <button id="glassesConnect" class="secondary" type="button">Connect glasses in Meta AI</button>
         <button id="glassesButton" class="secondary" type="button" aria-pressed="false">Use Meta glasses camera</button>
         <p id="glassesStatus" class="glasses-status" role="status" aria-live="polite">Connect the glasses in the Meta AI app, then select this camera.</p>
+        <div class="glasses-recovery" id="glassesRecovery" hidden>
+          <strong>Check the glasses connection</strong>
+          <p>Open Meta AI and confirm that your glasses show Connected. Keep them unfolded and switched on, check Bluetooth and Developer Mode, then return to Caliban and retry.</p>
+          <p>The iPhone camera remains available during a glasses connection failure.</p>
+        </div>
       </details>
       <p class="glasses-status">When the call connects, Caliban transcribes the audio and saves stills from the active phone camera. End the call to stop.</p>
       <div class="call-actions"><button id="callButton" class="primary" disabled><svg viewBox="0 0 24 24"><rect x="3" y="6" width="14" height="12" rx="3"/><path d="m17 10 4-3v10l-4-3"/></svg><span>Start call</span></button><button id="hangupButton" class="hangup" hidden><svg viewBox="0 0 24 24"><path d="M3 16.5a16 16 0 0 1 18 0l-3.5 4-3-2.3v-3.1a9 9 0 0 0-5 0v3.1l-3 2.3z"/></svg>End call</button></div>

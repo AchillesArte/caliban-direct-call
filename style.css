@@ -101,6 +101,9 @@ button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px 
 .glasses-choice summary { color: var(--aqua); font-size: 12px; font-weight: 700; cursor: pointer; }
 .glasses-choice button { margin: 12px 0 0; width: 100%; }
 .glasses-choice .glasses-status { font-size: 11px; line-height: 1.45; color: var(--dim); }
+.glasses-recovery { border: 1px solid rgba(255,159,172,.42); background: rgba(97,39,51,.24); border-radius: 10px; padding: 12px; margin-top: 12px; }
+.glasses-recovery strong { display: block; color: #ffd1d8; font-size: 12px; }
+.glasses-recovery p { color: #e8c7cb; margin: 8px 0 0; }
 .controls { display: flex; justify-content: space-between; gap: 9px; padding: 0 5px; }
 .control { flex: 1 1 0; min-width: 0; color: var(--dim); font-size: 11px; gap: 7px; }
 .control-figure { width: min(100%, 62px); height: 54px; border: 1px solid #3c5960; border-radius: 11px; background: #192a31; }
