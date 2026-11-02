@@ -116,6 +116,9 @@
     const sender = peer?.getSenders().find(s => s.track?.kind === 'video') ||
       peer?.getTransceivers().find(t => t.receiver?.track?.kind === 'video')?.sender;
     if (sender) await sender.replaceTrack(glassesTrack);
+    // The glasses are now the selected camera. Release the iPhone camera
+    // instead of continuing to capture an unused second video source.
+    if (phoneCameraTrack && phoneCameraTrack !== glassesTrack) phoneCameraTrack.stop();
     if (existing && existing !== glassesTrack) localStream.removeTrack(existing);
     if (!localStream.getTracks().includes(glassesTrack)) localStream.addTrack(glassesTrack);
     glassesTrack.enabled = !cameraDisabled;
@@ -136,6 +139,10 @@
         replacement = phone.getVideoTracks()[0];
         phoneCameraTrack = replacement;
       } catch (error) { glassesInfo(`Phone camera unavailable: ${error.message}`); }
+    }
+    if (!replacement) {
+      glassesInfo('The iPhone camera could not reopen. Meta video remains selected; try switching again.');
+      return;
     }
     const sender = peer?.getSenders().find(s => s.track === glassesTrack) ||
       peer?.getTransceivers().find(t => t.sender?.track === glassesTrack)?.sender;
@@ -170,7 +177,9 @@
           void scheduleGlassesSwitch(usePhoneTrack);
         }
       }
-      glassesInfo(typeof message === 'string' && message ? message : `Meta glasses: ${glassesStatus}`);
+      glassesInfo(glassesStatus === 'streaming' && glassesActive
+        ? 'Meta glasses camera is sending video to Caliban. Your iPhone microphone remains active.'
+        : (typeof message === 'string' && message ? message : `Meta glasses: ${glassesStatus}`));
       updateGlassesButton();
     },
     onFrame(base64Jpeg) {
@@ -204,7 +213,9 @@
             glassesSwitchQueued = true;
             void scheduleGlassesSwitch(useGlassesTrack).finally(() => { glassesSwitchQueued = false; });
           }
-          else glassesInfo('Meta glasses camera ready. Start a call to send its view.');
+          else if (!glassesActive && callPhase === 'idle') {
+            glassesInfo('Meta glasses camera ready. Start a call to send its view.');
+          }
         } catch (error) {
           glassesRequested = false;
           postGlasses('stop');
@@ -659,17 +670,20 @@
     }
     let stream;
     audioOnly = false;
+    const glassesReady = glassesRequested && glassesTrack?.readyState === 'live';
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-        video: { facingMode: 'user' },
+        // A glasses video track already exists. Keep only the phone microphone
+        // active, avoiding needless activation of the iPhone camera.
+        video: glassesReady ? false : { facingMode: 'user' },
       });
     } catch (error) {
       if (!['NotAllowedError', 'NotFoundError', 'NotReadableError', 'AbortError', 'OverconstrainedError'].includes(error.name)) throw error;
       // A missing or denied camera must not prevent a microphone-only call.
       stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      audioOnly = true;
-      displayError('Camera access is unavailable. This call will continue with microphone audio only.');
+      audioOnly = !glassesReady;
+      if (!glassesReady) displayError('Camera access is unavailable. This call will continue with microphone audio only.');
     }
     if (expectedSession !== sessionNumber) {
       stream.getTracks().forEach(track => track.stop());
