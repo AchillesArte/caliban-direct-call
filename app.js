@@ -27,6 +27,9 @@
   let token = '';
   let ws = null;
   let reconnectTimer = null;
+  let resolvingEndpoint = false;
+  let hiddenAt = 0;
+  let lastResumeAt = 0;
   let ringTimer = null;
   let durationTimer = null;
   let reconnectAttempts = 0;
@@ -446,7 +449,7 @@
   }
 
   async function connect() {
-    if (!token || (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) return;
+    if (!token || resolvingEndpoint || (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) return;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     if (!window.isSecureContext) {
       displayError('Camera and microphone access requires HTTPS. Open the secure pairing link supplied by Caliban.');
@@ -455,14 +458,19 @@
     }
     resetPresence();
     let address;
+    const pairingAtStart = token;
+    resolvingEndpoint = true;
     try { address = await signalingAddress(); }
     catch (error) {
       displayError(error.message);
       reconnectAttempts += 1;
       reconnectTimer = setTimeout(connect, Math.min(15000, 700 * (2 ** Math.min(reconnectAttempts, 5))));
       return;
+    } finally {
+      resolvingEndpoint = false;
     }
-    if (!token || (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) return;
+    if (!token || token !== pairingAtStart ||
+        (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) return;
     const connection = new WebSocket(address);
     ws = connection;
 
@@ -943,6 +951,34 @@
   ui.remoteVideo.addEventListener('loadedmetadata', () => { if (callPhase !== 'idle') playRemoteAudio(); });
   window.addEventListener('online', () => { if (token) connect(); });
   window.addEventListener('offline', () => { status('Offline'); });
+  function resumeConnection() {
+    if (!token || document.visibilityState === 'hidden') return;
+    const now = Date.now();
+    if (now - lastResumeAt < 1500) return;
+    lastResumeAt = now;
+    const suspended = hiddenAt && now - hiddenAt >= 12000;
+    hiddenAt = 0;
+    // iOS sometimes retains a WebSocket marked OPEN after suspending the
+    // Home Screen app. Recreate idle signalling when returning to the app.
+    // Never interrupt an active call merely for a focus event.
+    if (!suspended && socketReady) return;
+    if (callPhase !== 'idle' && socketReady) return;
+    if (ws) {
+      const old = ws;
+      ws = null;
+      old.close();
+    }
+    socketReady = false;
+    connect();
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') hiddenAt = Date.now();
+    else resumeConnection();
+  });
+  window.addEventListener('pageshow', event => {
+    if (event.persisted) resumeConnection();
+  });
+  window.addEventListener('focus', resumeConnection);
   window.addEventListener('beforeunload', () => {
     if (callPhase !== 'idle') send({ type: 'hangup' });
     if (localStream) localStream.getTracks().forEach(track => track.stop());
