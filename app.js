@@ -19,6 +19,8 @@
     muteButton: $('muteButton'), videoButton: $('videoButton'), flipButton: $('flipButton'),
     audioButton: $('audioButton'), duration: $('duration'), installButton: $('installButton'),
     installHelp: $('installHelp'), unpairButton: $('unpairButton'),
+    captionStatus: $('captionStatus'), captionList: $('captionList'),
+    captionPlaceholder: $('captionPlaceholder'), copyCaptions: $('copyCaptions'),
   };
 
   let token = '';
@@ -44,6 +46,35 @@
   let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
   let pendingCandidates = [];
   let deferredInstallPrompt = null;
+  const captions = [];
+  const CAPTION_LIMIT = 35;
+
+  function resetCaptions() {
+    captions.length = 0;
+    ui.captionList.replaceChildren();
+    const placeholder = document.createElement('span');
+    placeholder.className = 'caption-line';
+    placeholder.textContent = 'Listening for speech…';
+    ui.captionList.append(placeholder);
+    ui.copyCaptions.disabled = true;
+  }
+
+  function appendCaption(message) {
+    if (!recordingActive || !message || !['me', 'others'].includes(message.speaker) || !message.text) return;
+    const speaker = message.speaker === 'me' ? 'You' : 'Desktop';
+    if (!captions.length) ui.captionList.replaceChildren();
+    const content = String(message.text);
+    captions.push(`${speaker}: ${content}`);
+    if (captions.length > CAPTION_LIMIT) { captions.shift(); ui.captionList.firstChild?.remove(); }
+    const nearEnd = ui.captionList.scrollHeight - ui.captionList.scrollTop - ui.captionList.clientHeight < 45;
+    const entry = document.createElement('div'); entry.className = 'caption-line';
+    const heading = document.createElement('strong');heading.textContent = speaker;
+    const phrase = document.createElement('span'); phrase.textContent = content;
+    entry.append(heading,phrase);
+    ui.captionList.append(entry);
+    ui.copyCaptions.disabled = false;
+    if (nearEnd) ui.captionList.scrollTop = ui.captionList.scrollHeight;
+  }
 
   function displayError(message) {
     ui.error.textContent = message;
@@ -188,12 +219,15 @@
     ui.recordingChip.hidden = !recordingActive;
     ui.recordingNotice.hidden = !recordingActive;
     if (recordingActive) {
+      if (!wasRecording) resetCaptions();
+      ui.captionStatus.textContent = 'Listening; recognised speech appears after short audio segments.';
       ui.recordingNotice.textContent = 'Recording or transcription is active on the desktop. Confirm that all participants consent to being recorded.';
       if (!wasRecording && callPhase !== 'idle' && !recordingConsent) {
         endCall(true);
         displayError('The desktop reported recording without your confirmation. The call was ended.');
       }
     } else {
+      ui.captionStatus.textContent = 'Transcription is off. Earlier captions remain until the next call.';
       recordingConsent = false;
       ui.consentCheck.checked = false;
     }
@@ -324,6 +358,14 @@
       }
       case 'recording': {
         setRecording(message.active ?? message.recording ?? false);
+        break;
+      }
+      case 'transcription_status': {
+        if (typeof message.message === 'string') ui.captionStatus.textContent = message.message;
+        break;
+      }
+      case 'transcript': {
+        appendCaption(message);
         break;
       }
       case 'accept': {
@@ -696,6 +738,11 @@
   ui.videoButton.addEventListener('click', toggleCamera);
   ui.flipButton.addEventListener('click', flipCamera);
   ui.audioButton.addEventListener('click', playRemoteAudio);
+  ui.copyCaptions.addEventListener('click', () => {
+    if (captions.length && navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(captions.join('\n')).catch(() => displayError('The browser could not copy captions.'));
+    }
+  });
   ui.remoteVideo.addEventListener('loadedmetadata', () => { if (callPhase !== 'idle') playRemoteAudio(); });
   window.addEventListener('online', () => { if (token) connect(); });
   window.addEventListener('offline', () => { status('Offline'); });
