@@ -21,6 +21,7 @@
     installHelp: $('installHelp'), unpairButton: $('unpairButton'),
     captionStatus: $('captionStatus'), captionList: $('captionList'),
     captionPlaceholder: $('captionPlaceholder'), copyCaptions: $('copyCaptions'),
+    glassesPanel: $('glassesPanel'), glassesButton: $('glassesButton'), glassesConnect: $('glassesConnect'), glassesStatus: $('glassesStatus'),
   };
 
   let token = '';
@@ -43,11 +44,182 @@
   let peer = null;
   let localStream = null;
   let remoteStream = null;
+  // The Meta DAT SDK runs in the native iOS wrapper. Safari cannot see its
+  // camera as a getUserMedia device; native JPEGs are drawn into this track.
+  const nativeGlasses = window.webkit?.messageHandlers?.calibanGlasses;
+  let glassesRequested = false;
+  let glassesActive = false;
+  let glassesCanvas = null;
+  let glassesStream = null;
+  let glassesTrack = null;
+  let phoneCameraTrack = null;
+  let glassesFrameBusy = false;
+  let glassesFrameLastAt = 0;
+  let glassesStatus = 'idle';
+  let glassesSwitching = Promise.resolve();
+  let glassesSwitchQueued = false;
   let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
   let pendingCandidates = [];
   let deferredInstallPrompt = null;
   const captions = [];
   const CAPTION_LIMIT = 35;
+
+  ui.glassesPanel.hidden = !nativeGlasses;
+
+  function postGlasses(action) {
+    if (!nativeGlasses) return false;
+    try { nativeGlasses.postMessage({action}); return true; }
+    catch (error) { ui.glassesStatus.textContent = `Glasses connection failed: ${error.message}`; return false; }
+  }
+
+  function glassesInfo(text) {
+    if (ui.glassesStatus) ui.glassesStatus.textContent = text;
+  }
+
+  function updateGlassesButton() {
+    if (!nativeGlasses) return;
+    ui.glassesButton.setAttribute('aria-pressed', String(glassesRequested));
+    ui.glassesButton.textContent = glassesRequested ? 'Use iPhone camera' : 'Use Meta glasses camera';
+    ui.glassesButton.disabled = glassesStatus === 'connecting';
+    ui.flipButton.disabled = glassesRequested || !localStream || cameraDisabled || localStream.getVideoTracks().length === 0;
+  }
+
+  function scheduleGlassesSwitch(fn) {
+    glassesSwitching = glassesSwitching.catch(() => {}).then(fn).catch(error => {
+      glassesInfo(`Camera source change failed: ${error.message}`);
+      displayError(`Could not switch camera: ${error.message}`);
+    });
+    return glassesSwitching;
+  }
+
+  async function useGlassesTrack() {
+    if (!glassesRequested || !glassesTrack || !localStream || callPhase === 'idle' || glassesActive) return;
+    const existing = localStream.getVideoTracks()[0] || null;
+    if (existing && existing !== glassesTrack && existing !== phoneCameraTrack && existing.readyState === 'live') {
+      existing.stop();
+    }
+    const sender = peer?.getSenders().find(s => s.track?.kind === 'video') ||
+      peer?.getTransceivers().find(t => t.receiver?.track?.kind === 'video')?.sender;
+    if (sender) await sender.replaceTrack(glassesTrack);
+    if (existing && existing !== glassesTrack) localStream.removeTrack(existing);
+    if (!localStream.getTracks().includes(glassesTrack)) localStream.addTrack(glassesTrack);
+    glassesTrack.enabled = !cameraDisabled;
+    ui.localVideo.srcObject = localStream;
+    ui.localVideo.classList.add('back-camera');
+    void ui.localVideo.play().catch(() => {});
+    glassesActive = true;
+    glassesInfo('Meta glasses camera is sending video to Caliban. Your iPhone microphone remains active.');
+    updateDisplay();
+  }
+
+  async function usePhoneTrack() {
+    if (!glassesActive || !localStream) { glassesActive = false; return; }
+    let replacement = phoneCameraTrack?.readyState === 'live' ? phoneCameraTrack : null;
+    if (!replacement) {
+      try {
+        const phone = await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:cameraFacing}}});
+        replacement = phone.getVideoTracks()[0];
+        phoneCameraTrack = replacement;
+      } catch (error) { glassesInfo(`Phone camera unavailable: ${error.message}`); }
+    }
+    const sender = peer?.getSenders().find(s => s.track === glassesTrack) ||
+      peer?.getTransceivers().find(t => t.sender?.track === glassesTrack)?.sender;
+    if (sender) await sender.replaceTrack(replacement);
+    if (glassesTrack && localStream.getTracks().includes(glassesTrack)) localStream.removeTrack(glassesTrack);
+    if (replacement && !localStream.getTracks().includes(replacement)) localStream.addTrack(replacement);
+    glassesActive = false;
+    ui.localVideo.srcObject = localStream;
+    ui.localVideo.classList.toggle('back-camera', cameraFacing === 'environment');
+    void ui.localVideo.play().catch(() => {});
+    updateDisplay();
+  }
+
+  async function disableGlasses() {
+    glassesRequested = false;
+    glassesStatus = 'idle';
+    updateGlassesButton();
+    postGlasses('stop');
+    await scheduleGlassesSwitch(usePhoneTrack);
+    glassesInfo('Using the iPhone camera.');
+  }
+
+  // This bridge exists only inside the native Caliban iOS app. Frames originate
+  // in an explicit Meta SDK streaming session with Meta's camera permission.
+  window.CalibanGlassesBridge = {
+    onStatus(state, message) {
+      if (!nativeGlasses) return;
+      glassesStatus = ['connecting', 'streaming', 'idle', 'error'].includes(state) ? state : 'idle';
+      if (glassesStatus === 'error' || (glassesStatus === 'idle' && glassesActive)) {
+        if (glassesRequested) {
+          glassesRequested = false;
+          void scheduleGlassesSwitch(usePhoneTrack);
+        }
+      }
+      glassesInfo(typeof message === 'string' && message ? message : `Meta glasses: ${glassesStatus}`);
+      updateGlassesButton();
+    },
+    onFrame(base64Jpeg) {
+      if (!nativeGlasses || !glassesRequested || typeof base64Jpeg !== 'string' ||
+          base64Jpeg.length > 350000 || glassesFrameBusy) return;
+      glassesFrameBusy = true;
+      const frame = new Image();
+      frame.onload = () => {
+        try {
+          if (!glassesRequested) return;
+          if (!glassesCanvas) {
+            glassesCanvas = document.createElement('canvas');
+            glassesCanvas.width = frame.naturalWidth;
+            glassesCanvas.height = frame.naturalHeight;
+          }
+          if (glassesCanvas.width !== frame.naturalWidth || glassesCanvas.height !== frame.naturalHeight) {
+            glassesCanvas.width = frame.naturalWidth;
+            glassesCanvas.height = frame.naturalHeight;
+          }
+          const context = glassesCanvas.getContext('2d', {alpha:false});
+          if (!context) throw new Error('Camera canvas unavailable.');
+          context.drawImage(frame, 0, 0);
+          glassesFrameLastAt = Date.now();
+          if (!glassesTrack) {
+            if (typeof glassesCanvas.captureStream !== 'function') throw new Error('This iOS WebView cannot transmit canvas video.');
+            glassesStream = glassesCanvas.captureStream(15);
+            glassesTrack = glassesStream.getVideoTracks()[0] || null;
+            if (!glassesTrack) throw new Error('No video track could be created for the glasses.');
+          }
+          if (callPhase !== 'idle' && localStream && !glassesActive && !glassesSwitchQueued) {
+            glassesSwitchQueued = true;
+            void scheduleGlassesSwitch(useGlassesTrack).finally(() => { glassesSwitchQueued = false; });
+          }
+          else glassesInfo('Meta glasses camera ready. Start a call to send its view.');
+        } catch (error) {
+          glassesRequested = false;
+          postGlasses('stop');
+          glassesInfo(`Meta glasses unavailable: ${error.message}`);
+          updateGlassesButton();
+        } finally { glassesFrameBusy = false; }
+      };
+      frame.onerror = () => { glassesFrameBusy = false; glassesInfo('Could not decode a glasses video frame.'); };
+      frame.src = `data:image/jpeg;base64,${base64Jpeg}`;
+    },
+  };
+
+  ui.glassesButton.addEventListener('click', () => {
+    if (!nativeGlasses) return;
+    if (glassesRequested) { void disableGlasses(); return; }
+    glassesRequested = true;
+    glassesStatus = 'connecting';
+    glassesInfo('Connecting to the Meta glasses through the Meta AI app…');
+    updateGlassesButton();
+    if (!postGlasses('start')) {
+      glassesRequested = false;
+      glassesStatus = 'error';
+      updateGlassesButton();
+    }
+  });
+  ui.glassesConnect.addEventListener('click', () => {
+    if (!nativeGlasses) return;
+    glassesInfo('Opening Meta AI to register the glasses with this Caliban app…');
+    postGlasses('connect');
+  });
 
   function resetCaptions() {
     captions.length = 0;
@@ -172,7 +344,7 @@
     ui.callButton.disabled = !socketReady || !desktopOnline || busy || (recordingActive && !ui.consentCheck.checked);
     ui.muteButton.disabled = !localStream;
     ui.videoButton.disabled = !localStream || localStream.getVideoTracks().length === 0;
-    ui.flipButton.disabled = !localStream || cameraDisabled || localStream.getVideoTracks().length === 0;
+    ui.flipButton.disabled = glassesRequested || !localStream || cameraDisabled || localStream.getVideoTracks().length === 0;
     ui.localWrap.classList.toggle('show', Boolean(localStream && localStream.getVideoTracks().length));
     ui.recordingChip.hidden = !recordingActive;
     if (busy) {
@@ -463,6 +635,7 @@
       return false;
     }
     localStream = stream;
+    phoneCameraTrack = stream.getVideoTracks()[0] || null;
     microphoneMuted = false;
     cameraDisabled = false;
     cameraFacing = 'user';
@@ -471,6 +644,7 @@
     ui.localVideo.play().catch(() => {});
     updateControls();
     updateDisplay();
+    if (glassesRequested && glassesTrack) await scheduleGlassesSwitch(useGlassesTrack);
     return true;
   }
 
@@ -531,6 +705,9 @@
       }
     };
     localStream.getTracks().forEach(track => connection.addTrack(track, localStream));
+    // Keep a negotiable video sender if the user starts in audio-only mode and
+    // the glasses camera becomes available later during the same call.
+    if (!localStream.getVideoTracks().length) connection.addTransceiver('video', {direction:'sendrecv'});
     return connection;
   }
 
@@ -623,6 +800,16 @@
     pendingCandidates = [];
     if (localStream) localStream.getTracks().forEach(track => track.stop());
     localStream = null;
+    phoneCameraTrack?.stop();
+    phoneCameraTrack = null;
+    glassesStream?.getTracks().forEach(track => track.stop());
+    glassesStream = null;
+    glassesTrack = null;
+    glassesCanvas = null;
+    glassesActive = false;
+    glassesRequested = false;
+    glassesStatus = 'idle';
+    postGlasses('stop');
     remoteStream = null;
     ui.remoteVideo.pause();
     ui.remoteVideo.srcObject = null;
@@ -639,6 +826,7 @@
     callPhase = 'idle';
     updateControls();
     updateDisplay();
+    updateGlassesButton();
   }
 
   function updateControls() {
@@ -664,7 +852,7 @@
   }
 
   async function flipCamera() {
-    if (!localStream || cameraDisabled || ui.flipButton.disabled) return;
+    if (!localStream || glassesRequested || cameraDisabled || ui.flipButton.disabled) return;
     ui.flipButton.disabled = true;
     const nextFacing = cameraFacing === 'user' ? 'environment' : 'user';
     const previous = localStream.getVideoTracks()[0];
@@ -675,6 +863,7 @@
       const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: nextFacing } }, audio: false });
       const replacement = videoStream.getVideoTracks()[0];
       if (!replacement) throw new Error('No video track returned');
+      phoneCameraTrack = replacement;
       if (!localStream || callPhase === 'idle') { replacement.stop(); return; }
       localStream.removeTrack(previous);
       localStream.addTrack(replacement);
@@ -690,6 +879,7 @@
       try {
         const restored = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: cameraFacing } }, audio: false });
         const replacement = restored.getVideoTracks()[0];
+        phoneCameraTrack = replacement;
         if (localStream && callPhase !== 'idle') {
           localStream.removeTrack(previous);
           localStream.addTrack(replacement);

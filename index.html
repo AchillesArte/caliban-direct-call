@@ -74,6 +74,9 @@
     .small-button {padding:7px 11px;font-size:11px;border-radius:8px;background:#1b3947;border:1px solid #315665;color:#c9ebe5;font-weight:650}
     .consent {display:flex;align-items:flex-start;gap:10px;margin:13px 0 0;color:#ccdae3;font-size:12px;line-height:1.5}
     .consent input {width:18px;height:18px;flex-shrink:0;accent-color:var(--teal);margin:0}
+    .glasses-choice {margin-top:14px;padding:12px;border-radius:12px;border:1px solid #3a6272;background:#0c2234}
+    .glasses-choice button {width:100%;margin-bottom:5px}
+    .glasses-choice .glasses-status {margin:4px 0 0;font-size:12px;line-height:1.5}
     .call-actions {display:flex;gap:10px;margin-top:14px}
     .call-actions button {flex:1;min-height:49px}
     .hangup {background:#c9485c;color:white;border:1px solid #f27587;border-radius:12px;display:inline-flex;justify-content:center;align-items:center;gap:7px;font-weight:700}
@@ -136,6 +139,11 @@
     <section class="panel" id="callPanel" hidden>
       <div class="panel-head"><div><div class="eyebrow">Your desktop</div><h2>Caliban Lifelog</h2></div><div id="desktopState" class="desktop-state">Checking presence</div></div>
       <p id="callDescription">Connecting to Caliban…</p>
+      <div class="glasses-choice" id="glassesPanel" hidden>
+        <button id="glassesConnect" class="secondary" type="button">Connect glasses in Meta AI</button>
+        <button id="glassesButton" class="secondary" type="button" aria-pressed="false">Use Meta glasses camera</button>
+        <p id="glassesStatus" class="glasses-status" role="status" aria-live="polite">Connect the glasses in the Meta AI app, then select this camera.</p>
+      </div>
       <label class="consent"><input type="checkbox" id="consentCheck"><span>All participants have been informed of any desktop recording or transcription and have agreed to it.</span></label>
       <div class="call-actions"><button id="callButton" class="primary" disabled><svg viewBox="0 0 24 24"><rect x="3" y="6" width="14" height="12" rx="3"/><path d="m17 10 4-3v10l-4-3"/></svg><span>Start video call</span></button><button id="hangupButton" class="hangup" hidden><svg viewBox="0 0 24 24"><path d="M3 16.5a16 16 0 0 1 18 0l-3.5 4-3-2.3v-3.1a9 9 0 0 0-5 0v3.1l-3 2.3z"/></svg>End call</button></div>
     </section>
