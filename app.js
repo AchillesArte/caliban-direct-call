@@ -6,6 +6,9 @@
   const TOKEN_KEY = 'caliban.phone.pairing.v1';
   const TOKEN_PATTERN = /^[a-fA-F0-9]{64}$/;
   const WEBSOCKET_OPEN = 1;
+  const FRAME_INTERVAL_MS = 3000;
+  const MAX_WS_BUFFERED_BYTES = 2 * 1024 * 1024;
+  const MAX_JPEG_BASE64_LENGTH = 800 * 1024;
 
   const ui = {
     connectionChip: $('connectionChip'), connectionText: $('connectionText'),
@@ -39,6 +42,9 @@
   let sessionNumber = 0;
   let desktopOnline = false;
   let recordingActive = false;
+  let recordingSessionId = null;
+  let frameTimer = null;
+  let frameCanvas = null;
   // This paired phone is the owner's personal lifelog device. Recording
   // requests originate from the paired desktop and are accepted for a call
   // without prompting again. An active recording remains plainly indicated.
@@ -126,7 +132,7 @@
     ui.localVideo.classList.add('back-camera');
     void ui.localVideo.play().catch(() => {});
     glassesActive = true;
-    glassesInfo('Meta glasses camera is sending video to Caliban. Your iPhone microphone remains active.');
+    glassesInfo('Meta glasses camera selected for Caliban still images. Your iPhone microphone remains active.');
     updateDisplay();
   }
 
@@ -178,7 +184,7 @@
         }
       }
       glassesInfo(glassesStatus === 'streaming' && glassesActive
-        ? 'Meta glasses camera is sending video to Caliban. Your iPhone microphone remains active.'
+        ? 'Meta glasses camera selected for Caliban still images. Your iPhone microphone remains active.'
         : (typeof message === 'string' && message ? message : `Meta glasses: ${glassesStatus}`));
       updateGlassesButton();
     },
@@ -259,6 +265,7 @@
 
   function appendCaption(message) {
     if (!recordingActive || !message || !['me', 'others'].includes(message.speaker) || !message.text) return;
+    if (recordingSessionId && message.session_id !== recordingSessionId) return;
     const speaker = message.speaker === 'me' ? 'You' : 'Desktop';
     if (!captions.length) ui.captionList.replaceChildren();
     const content = String(message.text);
@@ -293,6 +300,73 @@
       displayError(`Could not send signalling message: ${error.message}`);
       return false;
     }
+  }
+
+  // Capture at the source device. The selected track can be the iPhone camera
+  // or the native Meta SDK canvas; no desktop video decoding is required.
+  function sendFrame() {
+    if (!recordingActive || callPhase === 'idle' || cameraDisabled || !localStream ||
+        !ws || ws.readyState !== WEBSOCKET_OPEN || !socketReady ||
+        ws.bufferedAmount > MAX_WS_BUFFERED_BYTES) return;
+    const activeTrack = localStream.getVideoTracks().find(track => track.readyState === 'live' && track.enabled);
+    if (!activeTrack) return;
+    let source;
+    let width;
+    let height;
+    let cameraSource;
+    if (glassesActive && activeTrack === glassesTrack) {
+      if (!glassesCanvas || Date.now() - glassesFrameLastAt > 5000) return;
+      source = glassesCanvas;
+      width = source.width;
+      height = source.height;
+      cameraSource = 'meta_glasses';
+    } else if (!glassesActive && activeTrack === phoneCameraTrack) {
+      source = ui.localVideo;
+      if (source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+      width = source.videoWidth;
+      height = source.videoHeight;
+      cameraSource = 'iphone_camera';
+    } else return; // A camera source is changing; never upload a stale frame.
+    if (!width || !height) return;
+    const maxWidth = width >= height ? 1280 : 720;
+    const maxHeight = width >= height ? 720 : 1280;
+    const scale = Math.min(1, maxWidth / width, maxHeight / height);
+    try {
+      if (!frameCanvas) frameCanvas = document.createElement('canvas');
+      let encoded = '';
+      // Retain readable detail where possible; reduce quality or dimensions
+      // on unusually complex frames to meet the server's 600 KiB JPEG cap.
+      capture: for (const reduction of [1, 0.75, 0.5]) {
+        const targetWidth = Math.max(1, Math.round(width * scale * reduction));
+        const targetHeight = Math.max(1, Math.round(height * scale * reduction));
+        if (frameCanvas.width !== targetWidth) frameCanvas.width = targetWidth;
+        if (frameCanvas.height !== targetHeight) frameCanvas.height = targetHeight;
+        const context = frameCanvas.getContext('2d', {alpha:false});
+        if (!context) return;
+        context.drawImage(source, 0, 0, targetWidth, targetHeight);
+        for (const quality of [0.72, 0.55, 0.38]) {
+          const jpeg = frameCanvas.toDataURL('image/jpeg', quality);
+          encoded = jpeg.startsWith('data:image/jpeg;base64,') ? jpeg.slice(23) : '';
+          if (encoded && encoded.length <= MAX_JPEG_BASE64_LENGTH) break capture;
+        }
+      }
+      if (!encoded || encoded.length > MAX_JPEG_BASE64_LENGTH) return;
+      send({type:'frame', data:encoded, camera_source:cameraSource,
+            camera_facing:cameraSource === 'iphone_camera' ? cameraFacing : null});
+    } catch (error) {
+      console.warn('Could not capture the selected phone camera', error);
+    }
+  }
+
+  function stopFrameCapture() {
+    if (frameTimer) clearInterval(frameTimer);
+    frameTimer = null;
+  }
+
+  function startFrameCapture() {
+    if (frameTimer || !recordingActive || callPhase === 'idle') return;
+    frameTimer = setInterval(sendFrame, FRAME_INTERVAL_MS);
+    sendFrame();
   }
 
   function pairedTokenFromStorage() {
@@ -371,7 +445,9 @@
     ui.muteButton.disabled = !localStream;
     ui.videoButton.disabled = !localStream || localStream.getVideoTracks().length === 0;
     ui.flipButton.disabled = glassesRequested || !localStream || cameraDisabled || localStream.getVideoTracks().length === 0;
-    ui.localWrap.classList.toggle('show', Boolean(localStream && localStream.getVideoTracks().length));
+    const activeCamera = Boolean(localStream && !cameraDisabled &&
+      localStream.getVideoTracks().some(track => track.readyState === 'live' && track.enabled));
+    ui.localWrap.classList.toggle('show', busy && activeCamera);
     ui.recordingChip.hidden = !recordingActive;
     if (busy) {
       const labels = {
@@ -382,16 +458,18 @@
       };
       ui.callDescription.textContent = `${audioOnly ? 'Audio only · ' : ''}${labels[callPhase]}`;
       ui.stageTitle.textContent = callPhase === 'connected' ? 'Connected' : 'Calling Caliban';
-      ui.stageMessage.textContent = audioOnly && callPhase === 'connected' ? 'Microphone connected. Your camera is unavailable.' : labels[callPhase];
-      ui.stageCenter.classList.toggle('in-call', callPhase === 'connected' && ui.remoteVideo.classList.contains('visible'));
+      ui.stageMessage.textContent = cameraDisabled ? 'Camera paused. Microphone remains connected.'
+        : audioOnly && callPhase === 'connected' ? 'Microphone connected. Your camera is unavailable.' : labels[callPhase];
+      ui.stageCenter.classList.toggle('in-call', activeCamera &&
+        ui.localVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA);
     } else {
       ui.stageCenter.classList.remove('in-call');
-      ui.stageTitle.textContent = paired ? 'Your desktop is ready' : 'Your direct line';
+      ui.stageTitle.textContent = 'Phone camera standby';
       ui.stageMessage.textContent = paired
-        ? (desktopOnline ? 'Start a call to speak face to face.' : 'Open Caliban Lifelog on your computer to connect.')
-        : 'Connect securely to your Caliban desktop for a private video conversation.';
+        ? (desktopOnline ? 'Call Caliban to record spoken dialogue and stills from this phone.' : 'Open Caliban on your desktop to start a recorded call.')
+        : 'Pair your iPhone to capture spoken dialogue and still images during a call.';
       ui.callDescription.textContent = socketReady
-        ? (desktopOnline ? 'Your computer is online and available for a private call.' : 'Waiting for the Caliban desktop to connect.')
+        ? (desktopOnline ? 'Your desktop is ready for audio and phone-camera still capture.' : 'Waiting for the Caliban desktop to connect.')
         : 'Connecting to the secure signalling service…';
     }
     if (!paired) status('Not paired');
@@ -411,9 +489,12 @@
     updateDisplay();
   }
 
-  function setRecording(active) {
+  function setRecording(active, sessionId = null) {
     const wasRecording = recordingActive;
-    recordingActive = active === true;
+    recordingActive = active === true && callPhase !== 'idle';
+    recordingSessionId = recordingActive && typeof sessionId === 'string' ? sessionId : null;
+    if (recordingActive) startFrameCapture();
+    else stopFrameCapture();
     ui.recordingChip.hidden = !recordingActive;
     ui.recordingNotice.hidden = !recordingActive;
     if (recordingActive) {
@@ -581,10 +662,12 @@
         break;
       }
       case 'recording': {
-        setRecording(message.active ?? message.recording ?? false);
+        setRecording(message.active ?? message.recording ?? false, message.session_id);
         break;
       }
       case 'transcription_status': {
+        if (recordingActive && recordingSessionId && message.session_id &&
+            message.session_id !== recordingSessionId) break;
         if (typeof message.message === 'string') ui.captionStatus.textContent = message.message;
         break;
       }
@@ -723,14 +806,12 @@
       }
       if (event.track.kind === 'video') {
         ui.remoteVideo.classList.add('visible');
-        ui.stageCenter.classList.add('in-call');
         event.track.addEventListener('unmute', () => {
           if (connection === peer) ui.remoteVideo.classList.add('visible');
         });
         event.track.addEventListener('ended', () => {
           if (connection === peer) {
             ui.remoteVideo.classList.remove('visible');
-            ui.stageCenter.classList.remove('in-call');
           }
         });
       }
@@ -759,10 +840,9 @@
           break;
       }
     };
-    localStream.getTracks().forEach(track => connection.addTrack(track, localStream));
-    // Keep a negotiable video sender if the user starts in audio-only mode and
-    // the glasses camera becomes available later during the same call.
-    if (!localStream.getVideoTracks().length) connection.addTransceiver('video', {direction:'sendrecv'});
+    // WebRTC carries the call audio alone. Phone/Meta camera tracks stay local
+    // for the preview and periodic JPEG uploads over the paired WebSocket.
+    localStream.getAudioTracks().forEach(track => connection.addTrack(track, localStream));
     return connection;
   }
 
@@ -835,6 +915,7 @@
 
   function endCall(notifyRemote) {
     if (notifyRemote && callPhase !== 'idle') send({ type: 'hangup' });
+    setRecording(false);
     sessionNumber += 1;
     clearTimeout(ringTimer);
     clearInterval(durationTimer);
@@ -982,6 +1063,8 @@
     }
   });
   ui.remoteVideo.addEventListener('loadedmetadata', () => { if (callPhase !== 'idle') playRemoteAudio(); });
+  ui.localVideo.addEventListener('loadeddata', updateDisplay);
+  ui.localVideo.addEventListener('playing', updateDisplay);
   window.addEventListener('online', () => { if (token) connect(); });
   window.addEventListener('offline', () => { status('Offline'); });
   function resumeConnection() {

@@ -3,149 +3,57 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0a1421">
+  <meta name="theme-color" content="#0b1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Caliban">
-  <meta name="description" content="Private, direct audio and video calls to your Caliban Lifelog desktop.">
+  <meta name="description" content="Call your Caliban desktop and save periodic still images from your iPhone or connected Meta glasses.">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <title>Caliban — Direct Call</title>
-  <style>
-    :root { color-scheme:dark; --bg:#08111d; --panel:#102235; --panel2:#132a40; --edge:rgba(193,221,243,.14); --ink:#f0f6fb; --dim:#a7baca; --subtle:#7894ab; --aqua:#82dccf; --teal:#1a958c; --red:#ff9fa6; --orange:#ffbf94; --shadow:0 18px 65px rgba(0,0,0,.32) }
-    * { box-sizing:border-box }
-    html { height:100%; background:var(--bg) }
-    body { margin:0; min-height:100%; color:var(--ink); background:radial-gradient(ellipse 70% 37% at 12% -8%,#20485a 0%,transparent 90%),radial-gradient(ellipse 75% 53% at 104% 76%,#14243d 0%,transparent 85%),var(--bg); font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased }
-    button,input { font:inherit }
-    button { cursor:pointer; -webkit-tap-highlight-color:transparent }
-    button:disabled { opacity:.35; cursor:not-allowed }
-    button:focus-visible,input:focus-visible { outline:3px solid var(--aqua); outline-offset:3px }
-    button svg { width:22px;height:22px;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;fill:none;flex-shrink:0 }
-    .app { min-height:100vh; min-height:100dvh; max-width:760px; margin:0 auto; padding:calc(20px + env(safe-area-inset-top)) 18px calc(20px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:17px }
-    .top { display:flex; align-items:center; justify-content:space-between; gap:12px }
-    .brand { display:flex;align-items:center;gap:11px;min-width:0 }
-    .mark { display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:linear-gradient(145deg,#2a6268,#162d42);color:#c2fff3;font:600 25px/.9 Georgia,serif;border:1px solid #5a8d93;box-shadow:0 5px 20px #0003 }
-    .brand span { display:block;color:var(--subtle);font-size:10px;font-weight:700;letter-spacing:.22em;text-transform:uppercase }
-    h1 { font-size:21px;font-weight:660;letter-spacing:-.035em;line-height:1.1;margin:2px 0 0 }
-    .state-chip { max-width:46%;border:1px solid var(--edge); background:rgba(16,36,54,.9);border-radius:100px;display:flex;align-items:center;gap:8px;padding:8px 11px;font-size:11px;font-weight:650;color:#bed3dd;white-space:nowrap }
-    .state-chip .signal {width:7px;height:7px;background:#8199a9;border-radius:50%;flex-shrink:0}
-    .state-chip[data-status="online"] .signal { background:#79dec5;box-shadow:0 0 11px #5adac78a }
-    .state-chip[data-status="calling"] .signal { background:#ffc797;box-shadow:0 0 10px #ffc79783 }
-    .state-chip[data-status="error"] .signal { background:var(--red) }
-    .stage {position:relative;flex:1;min-height:310px;max-height:850px;border:1px solid #345168;border-radius:25px;overflow:hidden;background:#081725;box-shadow:var(--shadow);isolation:isolate;display:grid;place-items:center }
-    .stage::before {content:"";position:absolute;inset:-20%;z-index:-2;background:radial-gradient(circle at 50% 38%,#255367 0%,#0d283b 38%,#091724 75%)}
-    .stage::after { content:"";pointer-events:none;position:absolute;inset:0;z-index:4;box-shadow:inset 0 0 0 1px #fff1; border-radius:25px }
-    .remote-video { position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:transparent;z-index:1 }
-    .remote-video:not(.visible) {opacity:0;pointer-events:none}
-    .stage-art { position:absolute;inset:0;display:grid;place-items:center;z-index:0;pointer-events:none }
-    .stage-art .circle { width:min(59vw,230px);height:min(59vw,230px);border-radius:50%;border:1px solid #83b9b92e;display:grid;place-items:center;box-shadow:0 0 0 23px #83b9b910,0 0 0 54px #83b9b908;background:radial-gradient(circle at 30% 20%,#3a728070,#15344700 76%);color:#c3f8e8 }
-    .stage-art .circle svg {width:68px;height:68px;stroke-width:1.1;stroke:currentColor;fill:none;stroke-linecap:round;stroke-linejoin:round}
-    .stage-top { z-index:5;position:absolute;left:17px;right:17px;top:17px;display:flex;justify-content:space-between;gap:10px;align-items:center }
-    .glass-chip {display:inline-flex;align-items:center;gap:7px;background:#06131bbd;backdrop-filter:blur(10px);border:1px solid #ffffff21;border-radius:100px;padding:7px 11px;font-size:11px;font-weight:650;color:#edf9fc }
-    .glass-chip svg {width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none}
-    .glass-chip.recording {background:#611f2cdb;border-color:#faacb769;color:#fff0f1}
-    .record-dot {width:7px;height:7px;background:#ff6674;border-radius:50%;box-shadow:0 0 0 3px #ff667433}
-    .stage-center {position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;max-width:70%;text-align:center;gap:7px;margin-top:120px;pointer-events:none }
-    .stage-center h2 {font-size:23px;letter-spacing:-.04em;font-weight:600;margin:0;text-shadow:0 2px 20px #000 }
-    .stage-center p {font-size:12px;color:#c0d4df;line-height:1.6;margin:0;max-width:240px;text-shadow:0 1px 9px #000 }
-    .stage-center.in-call {display:none}
-    .local-wrap {position:absolute;bottom:17px;right:17px;width:105px;height:153px;z-index:5;border:2px solid #d8f3ed66;border-radius:15px;box-shadow:0 8px 22px #0009;background:#173349;overflow:hidden;display:none }
-    .local-wrap.show {display:block}
-    .local-video {width:100%;height:100%;object-fit:cover;transform:scaleX(-1);background:#0a1a27}
-    .local-video.back-camera {transform:none}
-    .local-label {position:absolute;bottom:7px;left:7px;background:#07131bc7;font-size:10px;padding:3px 7px;border-radius:6px}
-    .stage-footer {position:absolute;z-index:5;bottom:16px;left:17px;right:136px;min-height:26px;display:flex;align-items:flex-end }
-    .duration {font-size:12px;color:#e4f8f3;font-variant-numeric:tabular-nums;font-weight:600;text-shadow:0 2px 5px #000}
-    .panel {background:linear-gradient(155deg,#11283ad9,#0f1d2edc);border:1px solid var(--edge);border-radius:20px;padding:17px;box-shadow:0 8px 30px #0002}
-    .panel-head { display:flex;justify-content:space-between;align-items:flex-start;gap:9px;margin-bottom:13px }
-    .eyebrow {font-size:10px;color:var(--aqua);letter-spacing:.18em;font-weight:700;text-transform:uppercase;margin:0 0 4px}
-    .panel h2 {margin:0;font-size:17px;letter-spacing:-.025em;font-weight:650}
-    .panel p {font-size:12px;color:var(--dim);line-height:1.65;margin:8px 0}
-    .desktop-state {font-size:11px;color:var(--dim);display:flex;gap:7px;align-items:center;white-space:nowrap;padding-top:3px}
-    .desktop-state::before {content:"";width:7px;height:7px;background:#839bae;border-radius:50%}
-    .desktop-state.online::before {background:var(--aqua)}
-    .pair-row {display:flex;gap:9px;align-items:stretch}
-    .token-field {flex:1;min-width:0;color:#f0f8fb;background:#081a2b;border:1px solid #345369;padding:12px 13px;border-radius:11px;font-size:14px;letter-spacing:.04em}
-    .token-field::placeholder {font-size:12px;letter-spacing:0;color:#8198a9}
-    .primary {background:linear-gradient(135deg,#abf4e6,#5bcfc3);border:0;border-radius:12px;font-size:14px;font-weight:730;color:#08252d;padding:13px 17px;display:inline-flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 5px 19px #30c6b133 }
-    .primary:disabled {box-shadow:none}
-    .secondary {background:#1d3345;border:1px solid #395369;border-radius:12px;color:var(--ink);padding:11px 14px;font-size:13px;font-weight:650}
-    .small-button {padding:7px 11px;font-size:11px;border-radius:8px;background:#1b3947;border:1px solid #315665;color:#c9ebe5;font-weight:650}
-    .consent {display:flex;align-items:flex-start;gap:10px;margin:13px 0 0;color:#ccdae3;font-size:12px;line-height:1.5}
-    .consent input {width:18px;height:18px;flex-shrink:0;accent-color:var(--teal);margin:0}
-    .glasses-choice {margin-top:14px;padding:12px;border-radius:12px;border:1px solid #3a6272;background:#0c2234}
-    .glasses-choice button {width:100%;margin-bottom:5px}
-    .glasses-choice .glasses-status {margin:4px 0 0;font-size:12px;line-height:1.5}
-    .call-actions {display:flex;gap:10px;margin-top:14px}
-    .call-actions button {flex:1;min-height:49px}
-    .hangup {background:#c9485c;color:white;border:1px solid #f27587;border-radius:12px;display:inline-flex;justify-content:center;align-items:center;gap:7px;font-weight:700}
-    .hangup svg {width:19px;height:19px}
-    .controls {display:flex;justify-content:center;gap:clamp(7px,3vw,24px);padding:4px 0 1px}
-    .control {min-width:65px;display:flex;align-items:center;flex-direction:column;gap:7px;padding:0;border:0;background:transparent;color:#bed4e0;font-size:11px;font-weight:550}
-    .control-figure {height:55px;width:55px;border:1px solid #496175;border-radius:17px;background:#183044;display:grid;place-items:center;transition:background .14s ease,transform .14s ease}
-    .control:active .control-figure {transform:scale(.94)}
-    .control[aria-pressed="true"] .control-figure {background:#653641;border-color:#d47d8a;color:#ffe3e5}
-    .control:disabled {opacity:.38}
-    .alert {padding:12px 13px;border:1px solid #a4614f;background:#422b2a;color:#ffe5de;border-radius:12px;font-size:12px;line-height:1.5;margin:0}
-    .alert[hidden] {display:none}
-    .alert.recording-alert {background:#3b242c;border-color:#a14c63;color:#ffe4e9}
-    .bottom {display:flex;justify-content:space-between;align-items:center;gap:10px;color:#829baa;font-size:11px;padding:0 3px}
-    .bottom button {color:var(--aqua);background:none;border:0;padding:8px 0;font-size:11px;font-weight:650;text-align:right}
-    .help {margin-top:10px;font-size:12px;color:var(--dim);background:#0b1e2d;border:1px solid var(--edge);padding:11px;border-radius:10px;line-height:1.6}
-    .help[hidden], [hidden] {display:none!important}
-    .captions {background:#112438;border:1px solid var(--edge);border-radius:15px;padding:14px;min-height:90px}
-    .captions-head {display:flex;align-items:center;justify-content:space-between;gap:10px}
-    .captions h2 {margin:0;font-size:15px;letter-spacing:0}
-    .captions-head button {background:transparent;border:1px solid var(--edge);border-radius:9px;color:var(--aqua);padding:5px 9px;font-size:12px}
-    .captions .caption-status {font-size:12px;color:var(--dim);margin:6px 0 9px}
-    .caption-list {max-height:156px;overflow:auto;display:flex;flex-direction:column;gap:7px;scroll-behavior:smooth}
-    .caption-line {font-size:13px;line-height:1.45;padding:8px 10px;border-radius:9px;background:#0b1b2b;overflow-wrap:anywhere}
-    .caption-line strong {display:block;font-size:11px;color:var(--aqua);margin-bottom:2px}
-    @media(min-width:650px) {.app {padding:30px 28px; gap:20px}.stage {min-height:410px}.local-wrap {width:140px;height:195px}.stage-footer {right:176px}.panel {padding:20px}.stage-center {margin-top:150px}}
-    @media(max-height:720px) { .app {gap:11px;padding-top:calc(10px + env(safe-area-inset-top))}.stage {min-height:235px}.panel {padding:13px}.controls .control-figure {width:48px;height:48px}.controls {gap:9px}.local-wrap {height:115px;width:81px}.stage-footer {right:100px}}
-    @media(prefers-reduced-motion:reduce) {* {scroll-behavior:auto!important;transition:none!important;animation:none!important}}
-  </style>
+  <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <main class="app">
     <header class="top">
-      <div class="brand"><div class="mark" aria-hidden="true">C</div><div><span>Private connection</span><h1>Caliban</h1></div></div>
+      <div class="brand"><div class="mark" aria-hidden="true">C</div><div><span>Lifelog / iPhone</span><h1>Caliban</h1></div></div>
       <div class="state-chip" data-status="offline" id="connectionChip"><span class="signal"></span><span id="connectionText">Not paired</span></div>
     </header>
 
-    <section class="stage" aria-label="Video call">
-      <video id="remoteVideo" class="remote-video" autoplay playsinline></video>
+    <section class="stage" aria-label="Phone camera preview during a call">
+      <video id="remoteVideo" class="remote-video" autoplay playsinline aria-hidden="true"></video>
       <div class="stage-art" aria-hidden="true"><div class="circle"><svg viewBox="0 0 64 64"><path d="M16 19h32v26H16z M26 19v-6h12v6 M25 45v7 M39 45v7 M24 29h16 M24 35h16"/></svg></div></div>
       <div class="stage-top">
-        <span class="glass-chip"><svg viewBox="0 0 24 24"><path d="M4 17v-9l8-5 8 5v9l-8 5z M9 12l3 3 5-6"/></svg> Private call</span>
-        <span class="glass-chip recording" id="recordingChip" hidden><span class="record-dot"></span> Recording on desktop</span>
+        <span class="glass-chip"><svg viewBox="0 0 24 24"><path d="M4 17v-9l8-5 8 5v9l-8 5z M9 12l3 3 5-6"/></svg> PHONE CAMERA</span>
+        <span class="glass-chip recording" id="recordingChip" hidden><span class="record-dot"></span> SAVING STILLS</span>
       </div>
-      <div class="stage-center" id="stageCenter"><h2 id="stageTitle">Your direct line</h2><p id="stageMessage">Connect securely to your Caliban desktop for a private video conversation.</p></div>
-      <div class="local-wrap" id="localWrap"><video id="localVideo" class="local-video" muted autoplay playsinline></video><span class="local-label">You</span></div>
+      <div class="stage-center" id="stageCenter"><h2 id="stageTitle">Phone camera standby</h2><p id="stageMessage">Pair your iPhone, then start a call to capture audio and periodic camera stills.</p></div>
+      <div class="local-wrap" id="localWrap"><video id="localVideo" class="local-video" muted autoplay playsinline></video><span class="local-label">CAMERA PREVIEW</span></div>
       <div class="stage-footer"><span id="duration" class="duration" hidden>00:00</span></div>
     </section>
 
     <p id="error" class="alert" role="alert" hidden></p>
-    <p id="recordingNotice" class="alert recording-alert" role="status" hidden>Lifelogging active. Audio transcription and periodic video stills are being saved to your paired desktop.</p>
+    <p id="recordingNotice" class="alert recording-alert" role="status" hidden>Call recording active. This phone is saving periodic camera stills to Caliban on your desktop.</p>
 
     <section class="panel" id="pairPanel">
-      <div class="panel-head"><div><div class="eyebrow">One-time setup</div><h2>Pair your iPhone</h2></div></div>
-      <p>Open the pairing link shown by Caliban on your desktop, or enter its 64-character key.</p>
+      <div class="panel-head"><div><div class="eyebrow">01 / Device setup</div><h2>Connect your iPhone</h2></div></div>
+      <p>Scan the pairing code shown on your desktop, or paste the key from its pairing link.</p>
       <form id="pairForm" autocomplete="off"><label class="eyebrow" for="pairToken">Pairing key</label><div class="pair-row"><input class="token-field" id="pairToken" name="pairToken" type="text" maxlength="64" minlength="64" pattern="[a-fA-F0-9]{64}" placeholder="Paste 64-character key" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" required><button class="primary" type="submit">Pair</button></div></form>
-      <p>Pairing stays on this iPhone. The key is removed from the address after opening a pairing link.</p>
+      <p>Your pairing is saved on this device. You only need to pair again if you choose to forget it.</p>
     </section>
 
     <section class="panel" id="callPanel" hidden>
-      <div class="panel-head"><div><div class="eyebrow">Your desktop</div><h2>Caliban Lifelog</h2></div><div id="desktopState" class="desktop-state">Checking presence</div></div>
+      <div class="panel-head"><div><div class="eyebrow">02 / Direct call</div><h2>Desktop connection</h2></div><div id="desktopState" class="desktop-state">Checking presence</div></div>
       <p id="callDescription">Connecting to Caliban…</p>
-      <div class="glasses-choice" id="glassesPanel" hidden>
+      <details class="glasses-choice" id="glassesPanel" hidden>
+        <summary>Camera source options</summary>
         <button id="glassesConnect" class="secondary" type="button">Connect glasses in Meta AI</button>
         <button id="glassesButton" class="secondary" type="button" aria-pressed="false">Use Meta glasses camera</button>
         <p id="glassesStatus" class="glasses-status" role="status" aria-live="polite">Connect the glasses in the Meta AI app, then select this camera.</p>
-      </div>
-      <p class="glasses-status">Your paired desktop records and transcribes calls automatically. End the call to stop capture, or pause lifelogging on the desktop.</p>
-      <div class="call-actions"><button id="callButton" class="primary" disabled><svg viewBox="0 0 24 24"><rect x="3" y="6" width="14" height="12" rx="3"/><path d="m17 10 4-3v10l-4-3"/></svg><span>Start video call</span></button><button id="hangupButton" class="hangup" hidden><svg viewBox="0 0 24 24"><path d="M3 16.5a16 16 0 0 1 18 0l-3.5 4-3-2.3v-3.1a9 9 0 0 0-5 0v3.1l-3 2.3z"/></svg>End call</button></div>
+      </details>
+      <p class="glasses-status">When the call connects, Caliban transcribes the audio and saves stills from the active phone camera. End the call to stop.</p>
+      <div class="call-actions"><button id="callButton" class="primary" disabled><svg viewBox="0 0 24 24"><rect x="3" y="6" width="14" height="12" rx="3"/><path d="m17 10 4-3v10l-4-3"/></svg><span>Start call</span></button><button id="hangupButton" class="hangup" hidden><svg viewBox="0 0 24 24"><path d="M3 16.5a16 16 0 0 1 18 0l-3.5 4-3-2.3v-3.1a9 9 0 0 0-5 0v3.1l-3 2.3z"/></svg>End call</button></div>
     </section>
 
     <nav class="controls" aria-label="Call controls" id="controls" hidden>
@@ -156,14 +64,14 @@
     </nav>
 
     <section class="captions" aria-label="Live call transcription">
-      <div class="captions-head"><h2>Live transcription</h2><button type="button" id="copyCaptions" disabled>Copy</button></div>
+      <div class="captions-head"><div><div class="eyebrow">03 / Captured dialogue</div><h2>Live transcription</h2></div><button type="button" id="copyCaptions" disabled>Copy</button></div>
       <p id="captionStatus" class="caption-status" aria-live="polite">Transcription begins automatically when a lifelog call connects.</p>
       <div id="captionList" class="caption-list" role="log" aria-live="polite">
         <span class="caption-line" id="captionPlaceholder">Recognised speech will appear here during your call.</span>
       </div>
     </section>
 
-    <footer class="bottom"><span>Encrypted peer-to-peer media · HTTPS required</span><button id="installButton" type="button">Install on iPhone</button></footer>
+    <footer class="bottom"><span>Private device connection · HTTPS</span><button id="installButton" type="button">Add to Home Screen</button></footer>
     <p class="help" id="installHelp" hidden>In Safari, tap <strong>Share</strong>, select <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>. Launch Caliban from your Home Screen to call directly.</p>
     <button id="unpairButton" type="button" class="small-button" hidden>Forget pairing</button>
   </main>

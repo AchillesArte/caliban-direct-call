@@ -1,14 +1,14 @@
 {
   "id": "/caliban-direct-call/",
-  "name": "Caliban — Direct Call",
+  "name": "Caliban — Phone Lifelog",
   "short_name": "Caliban",
-  "description": "Call Caliban Lifelog directly from your iPhone with private video and audio.",
+  "description": "Send audio and periodic iPhone or Meta glasses camera stills to your private Caliban desktop.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#08111d",
-  "theme_color": "#0a1421",
+  "background_color": "#0b1117",
+  "theme_color": "#0b1117",
   "icons": [
     {
       "src": "./icon.svg",
