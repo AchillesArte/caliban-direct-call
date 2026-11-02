@@ -1,0 +1,32 @@
+{
+  "id": "/caliban-direct-call/",
+  "name": "Caliban — Direct Call",
+  "short_name": "Caliban",
+  "description": "Call Caliban Lifelog directly from your iPhone with private video and audio.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#08111d",
+  "theme_color": "#0a1421",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
