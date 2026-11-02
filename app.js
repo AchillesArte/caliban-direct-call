@@ -534,6 +534,10 @@
         token = '';
         forgetToken();
         updateDisplay();
+      } else if (event.code === 4009) {
+        // A second authorized Caliban window replaced this idle connection.
+        // Retain its pairing and reconnect when this app returns to view.
+        displayError('Caliban is open in another window. Return here to reconnect.');
       } else if (token) {
         endpointRefreshMode = true;
         reconnectAttempts += 1;
