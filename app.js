@@ -186,6 +186,7 @@
     onStatus(state, message) {
       if (!nativeGlasses) return;
       glassesStatus = ['connecting', 'streaming', 'idle', 'error'].includes(state) ? state : 'idle';
+      if (glassesStatus === 'error') ui.glassesPanel.open = true;
       if (glassesStatus === 'error' || (glassesStatus === 'idle' && glassesActive)) {
         if (glassesRequested) {
           glassesRequested = false;
