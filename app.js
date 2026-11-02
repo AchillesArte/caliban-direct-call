@@ -14,7 +14,7 @@
     recordingChip: $('recordingChip'), recordingNotice: $('recordingNotice'),
     error: $('error'), pairPanel: $('pairPanel'), pairForm: $('pairForm'),
     pairToken: $('pairToken'), callPanel: $('callPanel'), desktopState: $('desktopState'),
-    callDescription: $('callDescription'), consentCheck: $('consentCheck'),
+    callDescription: $('callDescription'),
     callButton: $('callButton'), hangupButton: $('hangupButton'), controls: $('controls'),
     muteButton: $('muteButton'), videoButton: $('videoButton'), flipButton: $('flipButton'),
     audioButton: $('audioButton'), duration: $('duration'), installButton: $('installButton'),
@@ -39,6 +39,9 @@
   let sessionNumber = 0;
   let desktopOnline = false;
   let recordingActive = false;
+  // This paired phone is the owner's personal lifelog device. Recording
+  // requests originate from the paired desktop and are accepted for a call
+  // without prompting again. An active recording remains plainly indicated.
   let recordingConsent = false;
   let socketReady = false;
   let connectedAt = 0;
@@ -354,7 +357,7 @@
     ui.controls.hidden = !busy;
     ui.callButton.hidden = busy;
     ui.hangupButton.hidden = !busy;
-    ui.callButton.disabled = !socketReady || !desktopOnline || busy || (recordingActive && !ui.consentCheck.checked);
+    ui.callButton.disabled = !socketReady || !desktopOnline || busy;
     ui.muteButton.disabled = !localStream;
     ui.videoButton.disabled = !localStream || localStream.getVideoTracks().length === 0;
     ui.flipButton.disabled = glassesRequested || !localStream || cameraDisabled || localStream.getVideoTracks().length === 0;
@@ -406,15 +409,10 @@
     if (recordingActive) {
       if (!wasRecording) resetCaptions();
       ui.captionStatus.textContent = 'Listening; recognised speech appears after short audio segments.';
-      ui.recordingNotice.textContent = 'Recording or transcription is active on the desktop. Confirm that all participants consent to being recorded.';
-      if (!wasRecording && callPhase !== 'idle' && !recordingConsent) {
-        endCall(true);
-        displayError('The desktop reported recording without your confirmation. The call was ended.');
-      }
+      ui.recordingNotice.textContent = 'Lifelogging active: audio transcription and video stills are saved to the desktop.';
     } else {
       ui.captionStatus.textContent = 'Transcription is off. Earlier captions remain until the next call.';
       recordingConsent = false;
-      ui.consentCheck.checked = false;
     }
     updateDisplay();
   }
@@ -565,12 +563,12 @@
         break;
       }
       case 'record_request': {
-        // A checkbox on a different screen never substitutes for fresh confirmation.
-        const accepted = window.confirm('Caliban requests permission to record and transcribe this call. Have all participants been informed, and does every participant consent? Select OK only if everyone agrees.');
+        // The owner has given standing consent for personal paired-device calls.
+        // Only an authenticated desktop can request this through the gateway.
+        // Reject recording requests outside an active call.
+        const accepted = callPhase !== 'idle';
         recordingConsent = accepted;
-        ui.consentCheck.checked = accepted;
         send({ type: 'record_consent', consent: accepted });
-        if (!accepted) displayError('Recording consent was declined. The desktop must keep recording disabled.');
         updateDisplay();
         break;
       }
@@ -783,12 +781,8 @@
 
   async function callDesktop() {
     if (!socketReady || !desktopOnline || callPhase !== 'idle') return;
-    if (recordingActive && !ui.consentCheck.checked) {
-      displayError('Confirm that every participant agrees to the active desktop recording before calling.');
-      return;
-    }
     displayError('');
-    recordingConsent = false; // Any recording request must receive fresh confirmation.
+    recordingConsent = false;
     const currentSession = ++sessionNumber;
     callPhase = 'preparing';
     updateDisplay();
@@ -967,7 +961,6 @@
     ui.pairToken.value = '';
     ui.pairToken.focus();
   });
-  ui.consentCheck.addEventListener('change', updateDisplay);
   ui.callButton.addEventListener('click', callDesktop);
   ui.hangupButton.addEventListener('click', () => { endCall(true); displayError(''); });
   ui.muteButton.addEventListener('click', toggleMic);

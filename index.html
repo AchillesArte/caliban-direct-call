@@ -127,7 +127,7 @@
     </section>
 
     <p id="error" class="alert" role="alert" hidden></p>
-    <p id="recordingNotice" class="alert recording-alert" role="alert" hidden>The desktop has started recording. End this call if any participant has not consented.</p>
+    <p id="recordingNotice" class="alert recording-alert" role="status" hidden>Lifelogging active. Audio transcription and periodic video stills are being saved to your paired desktop.</p>
 
     <section class="panel" id="pairPanel">
       <div class="panel-head"><div><div class="eyebrow">One-time setup</div><h2>Pair your iPhone</h2></div></div>
@@ -144,7 +144,7 @@
         <button id="glassesButton" class="secondary" type="button" aria-pressed="false">Use Meta glasses camera</button>
         <p id="glassesStatus" class="glasses-status" role="status" aria-live="polite">Connect the glasses in the Meta AI app, then select this camera.</p>
       </div>
-      <label class="consent"><input type="checkbox" id="consentCheck"><span>All participants have been informed of any desktop recording or transcription and have agreed to it.</span></label>
+      <p class="glasses-status">Your paired desktop records and transcribes calls automatically. End the call to stop capture, or pause lifelogging on the desktop.</p>
       <div class="call-actions"><button id="callButton" class="primary" disabled><svg viewBox="0 0 24 24"><rect x="3" y="6" width="14" height="12" rx="3"/><path d="m17 10 4-3v10l-4-3"/></svg><span>Start video call</span></button><button id="hangupButton" class="hangup" hidden><svg viewBox="0 0 24 24"><path d="M3 16.5a16 16 0 0 1 18 0l-3.5 4-3-2.3v-3.1a9 9 0 0 0-5 0v3.1l-3 2.3z"/></svg>End call</button></div>
     </section>
 
@@ -157,7 +157,7 @@
 
     <section class="captions" aria-label="Live call transcription">
       <div class="captions-head"><h2>Live transcription</h2><button type="button" id="copyCaptions" disabled>Copy</button></div>
-      <p id="captionStatus" class="caption-status" aria-live="polite">Available when call participants approve transcription.</p>
+      <p id="captionStatus" class="caption-status" aria-live="polite">Transcription begins automatically when a lifelog call connects.</p>
       <div id="captionList" class="caption-list" role="log" aria-live="polite">
         <span class="caption-line" id="captionPlaceholder">Recognised speech will appear here during your call.</span>
       </div>
