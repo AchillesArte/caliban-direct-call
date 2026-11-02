@@ -64,7 +64,14 @@
   const captions = [];
   const CAPTION_LIMIT = 35;
 
-  ui.glassesPanel.hidden = !nativeGlasses;
+  // Show the source choice in the native shell; explain the installation
+  // requirement if the page is opened in Safari or the Home Screen web app.
+  ui.glassesPanel.hidden = false;
+  if (!nativeGlasses) {
+    ui.glassesButton.hidden = true;
+    ui.glassesConnect.hidden = true;
+    ui.glassesStatus.textContent = 'Meta glasses video requires the native Caliban iPhone app. Safari and Home Screen web apps cannot access the Meta Wearables camera SDK.';
+  }
 
   function postGlasses(action) {
     if (!nativeGlasses) return false;
