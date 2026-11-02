@@ -187,7 +187,9 @@
       if (!nativeGlasses) return;
       glassesStatus = ['connecting', 'streaming', 'idle', 'error'].includes(state) ? state : 'idle';
       if (glassesStatus === 'error') ui.glassesPanel.open = true;
-      if (glassesStatus === 'error' || (glassesStatus === 'idle' && glassesActive)) {
+      // A native stop can occur during an iOS app switch, before the glasses
+      // have sent their first frame. Clear the pending choice in that case too.
+      if (glassesStatus === 'error' || glassesStatus === 'idle') {
         if (glassesRequested) {
           glassesRequested = false;
           void scheduleGlassesSwitch(usePhoneTrack);
