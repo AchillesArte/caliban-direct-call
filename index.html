@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Caliban">
-  <meta name="description" content="Call your Caliban desktop and save periodic still images from your iPhone or connected Meta glasses.">
+  <meta name="description" content="Stream live iPhone or Meta glasses video and microphone audio to your paired Caliban desktop, with optional archival stills.">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
@@ -28,13 +28,13 @@
         <span class="glass-chip"><svg viewBox="0 0 24 24"><path d="M4 17v-9l8-5 8 5v9l-8 5z M9 12l3 3 5-6"/></svg> <span id="cameraSourceLabel">PHONE CAMERA</span></span>
         <span class="glass-chip recording" id="recordingChip" hidden><span class="record-dot"></span> SAVING STILLS</span>
       </div>
-      <div class="stage-center" id="stageCenter"><h2 id="stageTitle">Phone camera standby</h2><p id="stageMessage">Pair your iPhone, then start a call to capture audio and periodic camera stills.</p></div>
+      <div class="stage-center" id="stageCenter"><h2 id="stageTitle">Phone camera standby</h2><p id="stageMessage">Pair your iPhone, then start a call to send continuous video and microphone audio.</p></div>
       <div class="local-wrap" id="localWrap"><video id="localVideo" class="local-video" muted autoplay playsinline></video><span class="local-label">CAMERA PREVIEW</span></div>
       <div class="stage-footer"><span id="duration" class="duration" hidden>00:00</span></div>
     </section>
 
     <p id="error" class="alert" role="alert" hidden></p>
-    <p id="recordingNotice" class="alert recording-alert" role="status" hidden>Call recording active. This phone is saving periodic camera stills to Caliban on your desktop.</p>
+    <p id="recordingNotice" class="alert recording-alert" role="status" hidden>Call recording active. Live video is sent to your desktop; periodic stills are saved in the archive.</p>
 
     <section class="panel" id="pairPanel">
       <div class="panel-head"><div><div class="eyebrow">01 / Device setup</div><h2>Connect your iPhone</h2></div></div>
@@ -60,7 +60,7 @@
           <p>The iPhone camera remains available during a glasses connection failure.</p>
         </div>
       </details>
-      <p class="glasses-status">When the call connects, Caliban transcribes the audio and saves stills from the active phone camera. End the call to stop.</p>
+      <p class="glasses-status">During a call, Caliban streams live video from the selected camera and microphone audio. Active lifelog recording archives periodic stills and transcribed speech. End the call to stop.</p>
       <div class="call-actions"><button id="callButton" class="primary" disabled><svg viewBox="0 0 24 24"><rect x="3" y="6" width="14" height="12" rx="3"/><path d="m17 10 4-3v10l-4-3"/></svg><span>Start call</span></button><button id="hangupButton" class="hangup" hidden><svg viewBox="0 0 24 24"><path d="M3 16.5a16 16 0 0 1 18 0l-3.5 4-3-2.3v-3.1a9 9 0 0 0-5 0v3.1l-3 2.3z"/></svg>End call</button></div>
     </section>
 

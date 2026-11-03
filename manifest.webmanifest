@@ -2,7 +2,7 @@
   "id": "/caliban-direct-call/",
   "name": "Caliban — Phone Lifelog",
   "short_name": "Caliban",
-  "description": "Send audio and periodic iPhone or Meta glasses camera stills to your private Caliban desktop.",
+  "description": "Stream live video and microphone audio from an iPhone or Meta glasses to your private Caliban desktop.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
