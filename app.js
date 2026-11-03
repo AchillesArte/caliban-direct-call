@@ -86,6 +86,10 @@
     ui.glassesButton.hidden = true;
     ui.glassesConnect.hidden = true;
     ui.glassesStatus.textContent = 'Meta glasses video requires the native Caliban iPhone app. Safari and Home Screen web apps cannot access the Meta Wearables camera SDK.';
+  } else {
+    // Keep the live Bluetooth permission and Meta connection diagnostics
+    // visible in the native app without requiring a second disclosure tap.
+    ui.glassesPanel.open = true;
   }
 
   function postGlasses(action) {
