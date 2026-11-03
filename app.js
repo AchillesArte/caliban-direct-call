@@ -25,6 +25,7 @@
     captionStatus: $('captionStatus'), captionList: $('captionList'),
     captionPlaceholder: $('captionPlaceholder'), copyCaptions: $('copyCaptions'),
     glassesPanel: $('glassesPanel'), glassesButton: $('glassesButton'), glassesConnect: $('glassesConnect'), glassesStatus: $('glassesStatus'),
+    glassesUpdate: $('glassesUpdate'), glassesUpdateHelp: $('glassesUpdateHelp'),
     glassesRecovery: $('glassesRecovery'), cameraSourceLabel: $('cameraSourceLabel'),
   };
 
@@ -71,6 +72,7 @@
   let glassesFrameBusy = false;
   let glassesFrameLastAt = 0;
   let glassesStatus = 'idle';
+  let glassesNeedsDatUpdate = false;
   let glassesSwitching = Promise.resolve();
   let glassesSwitchQueued = false;
   let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
@@ -85,6 +87,8 @@
   if (!nativeGlasses) {
     ui.glassesButton.hidden = true;
     ui.glassesConnect.hidden = true;
+    ui.glassesUpdate.hidden = true;
+    ui.glassesUpdateHelp.hidden = true;
     ui.glassesStatus.textContent = 'Meta glasses video requires the native Caliban iPhone app. Safari and Home Screen web apps cannot access the Meta Wearables camera SDK.';
   } else {
     // Keep the live Bluetooth permission and Meta connection diagnostics
@@ -108,11 +112,13 @@
     ui.glassesButton.textContent = glassesRequested && glassesStatus === 'connecting'
       ? 'Cancel Meta camera connection'
       : glassesRequested ? 'Use iPhone camera'
-      : glassesStatus === 'error' ? 'Retry Meta glasses camera' : 'Use Meta glasses camera';
+      : ['error', 'dat_update_required'].includes(glassesStatus) ? 'Retry Meta glasses camera' : 'Use Meta glasses camera';
     // A native Meta discovery or camera-permission prompt may stall. Keep the
     // cancellation action available so the user can stop it immediately.
     ui.glassesButton.disabled = glassesStatus === 'connecting' && !glassesRequested;
-    ui.glassesRecovery.hidden = glassesStatus !== 'error';
+    ui.glassesRecovery.hidden = !['error', 'dat_update_required'].includes(glassesStatus);
+    ui.glassesUpdate.hidden = glassesStatus !== 'dat_update_required';
+    ui.glassesUpdateHelp.hidden = !glassesNeedsDatUpdate;
     ui.flipButton.disabled = glassesRequested || !localStream || cameraDisabled || localStream.getVideoTracks().length === 0;
   }
 
@@ -182,6 +188,7 @@
   async function disableGlasses() {
     glassesRequested = false;
     glassesStatus = 'idle';
+    glassesNeedsDatUpdate = false;
     updateGlassesButton();
     postGlasses('stop');
     await scheduleGlassesSwitch(usePhoneTrack);
@@ -193,11 +200,13 @@
   window.CalibanGlassesBridge = {
     onStatus(state, message) {
       if (!nativeGlasses) return;
-      glassesStatus = ['connecting', 'streaming', 'idle', 'error'].includes(state) ? state : 'idle';
-      if (glassesStatus === 'error') ui.glassesPanel.open = true;
+      glassesStatus = ['connecting', 'streaming', 'idle', 'error', 'dat_update_required'].includes(state) ? state : 'idle';
+      glassesNeedsDatUpdate = glassesStatus === 'dat_update_required' ||
+        (glassesStatus === 'error' && typeof message === 'string' && message.includes('The DAT app on the glasses needs an update'));
+      if (glassesStatus === 'error' || glassesStatus === 'dat_update_required') ui.glassesPanel.open = true;
       // A native stop can occur during an iOS app switch, before the glasses
       // have sent their first frame. Clear the pending choice in that case too.
-      if (glassesStatus === 'error' || glassesStatus === 'idle') {
+      if (glassesStatus === 'error' || glassesStatus === 'dat_update_required' || glassesStatus === 'idle') {
         if (glassesRequested) {
           glassesRequested = false;
           void scheduleGlassesSwitch(usePhoneTrack);
@@ -259,6 +268,7 @@
     if (glassesRequested) { void disableGlasses(); return; }
     glassesRequested = true;
     glassesStatus = 'connecting';
+    glassesNeedsDatUpdate = false;
     ui.glassesRecovery.hidden = true;
     glassesInfo('Connecting to the Meta glasses through the Meta AI app…');
     updateGlassesButton();
@@ -272,6 +282,11 @@
     if (!nativeGlasses) return;
     glassesInfo('Opening Meta AI to register the glasses with this Caliban app…');
     postGlasses('connect');
+  });
+  ui.glassesUpdate.addEventListener('click', () => {
+    if (!nativeGlasses) return;
+    glassesInfo('Opening the DAT app update screen in Meta AI…');
+    postGlasses('update-dat');
   });
 
   function resetCaptions() {
