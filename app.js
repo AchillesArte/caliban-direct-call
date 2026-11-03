@@ -101,9 +101,13 @@
   function updateGlassesButton() {
     if (!nativeGlasses) return;
     ui.glassesButton.setAttribute('aria-pressed', String(glassesRequested));
-    ui.glassesButton.textContent = glassesRequested ? 'Use iPhone camera'
+    ui.glassesButton.textContent = glassesRequested && glassesStatus === 'connecting'
+      ? 'Cancel Meta camera connection'
+      : glassesRequested ? 'Use iPhone camera'
       : glassesStatus === 'error' ? 'Retry Meta glasses camera' : 'Use Meta glasses camera';
-    ui.glassesButton.disabled = glassesStatus === 'connecting';
+    // A native Meta discovery or camera-permission prompt may stall. Keep the
+    // cancellation action available so the user can stop it immediately.
+    ui.glassesButton.disabled = glassesStatus === 'connecting' && !glassesRequested;
     ui.glassesRecovery.hidden = glassesStatus !== 'error';
     ui.flipButton.disabled = glassesRequested || !localStream || cameraDisabled || localStream.getVideoTracks().length === 0;
   }
