@@ -122,6 +122,19 @@ button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px 
 .bottom button { background: transparent; border: 0; color: var(--aqua); font-weight: 700; white-space: nowrap; padding: 7px 0; }
 .help { margin-top: 0; border: 1px solid var(--edge); border-radius: 10px; background: #0e1b22; color: var(--dim); }
 #unpairButton { align-self: flex-end; }
+.source-choice-label { display: block; margin-top: 15px; margin-bottom: 7px; }
+.source-select { display: block; width: 100%; min-height: 44px; padding: 10px 12px; border-radius: 9px; border: 1px solid #53707a; background: #0b1920; color: var(--ink); font: 13px var(--sans); }
+.lifelog-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 13px; }
+.lifelog-actions #startLifelog { grid-column: 1 / -1; min-height: 52px; font-size: 15px; }
+.lifelog-actions button { min-width: 0; padding: 10px 12px; }
+.bookmark-field { display: block; width: 100%; }
+.phone-record-health { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 12px 0 4px; }
+.phone-record-health > div { padding: 9px; border: 1px solid var(--edge); border-radius: 9px; background: #0c1a21; min-width: 0; }
+.phone-record-health span { display: block; color: var(--subtle); font-size: 10px; }
+.phone-record-health strong { display: block; color: var(--dim); font-size: 11px; overflow-wrap: anywhere; margin-top: 6px; }
+.phone-record-health strong[data-status='good'] { color: var(--aqua); }
+.phone-record-health strong[data-status='bad'] { color: var(--red); }
+.glasses-choice .call-actions button { margin-top: 10px; }
 [hidden] { display: none !important; }
 @media (min-width: 650px) { .app { padding: 30px 24px 45px; gap: 16px; } .stage { height: 460px; min-height: 460px; } .panel { padding: 22px; } }
 @media (max-width: 380px) { .app { padding-right: 13px; padding-left: 13px; } .stage { height: 39dvh; min-height: 242px; } .state-chip { font-size: 10px; } .panel { padding: 15px; } .stage-art { padding-top: 27px; } .stage-center { padding-top: 148px; } .stage-center h2 { font-size: 23px; } }

@@ -4,6 +4,7 @@
 
   const $ = id => document.getElementById(id);
   const TOKEN_KEY = 'caliban.phone.pairing.v1';
+  const SOURCE_KEY = 'caliban.phone.preferred-source.v1';
   const TOKEN_PATTERN = /^[a-fA-F0-9]{64}$/;
   const WEBSOCKET_OPEN = 1;
   const FRAME_INTERVAL_MS = 3000;
@@ -42,6 +43,10 @@
     glassesUpdate: $('glassesUpdate'), glassesUpdateHelp: $('glassesUpdateHelp'),
     glassesFirmwareUpdate: $('glassesFirmwareUpdate'), glassesFirmwareHelp: $('glassesFirmwareHelp'),
     glassesRecovery: $('glassesRecovery'), cameraSourceLabel: $('cameraSourceLabel'),
+    preferredSource: $('preferredSource'), startLifelog: $('startLifelog'), pauseLifelog: $('pauseLifelog'),
+    stopLifelog: $('stopLifelog'), bookmarkLifelog: $('bookmarkLifelog'), bookmarkNote: $('bookmarkNote'),
+    lifelogStatus: $('lifelogStatus'), recordingChipText: $('recordingChipText'), nativeConnection: $('nativeConnection'),
+    nativeReceiving: $('nativeReceiving'), nativeSaved: $('nativeSaved'), nativeHealthDetails: $('nativeHealthDetails'),
   };
 
   let token = '';
@@ -89,6 +94,26 @@
   // The Meta DAT SDK runs in the native iOS wrapper. Safari cannot see its
   // camera as a getUserMedia device; native JPEGs are drawn into this track.
   const nativeGlasses = window.webkit?.messageHandlers?.calibanGlasses;
+  const nativeCapture = window.webkit?.messageHandlers?.calibanCapture;
+  let preferredSource = 'iphone_camera';
+  try {
+    preferredSource = localStorage.getItem(SOURCE_KEY) || (nativeGlasses ? 'meta_glasses' : 'iphone_camera');
+  } catch { preferredSource = nativeGlasses ? 'meta_glasses' : 'iphone_camera'; }
+  if (!['meta_glasses', 'iphone_camera'].includes(preferredSource)) preferredSource = 'iphone_camera';
+  if (!nativeGlasses && preferredSource === 'meta_glasses') preferredSource = 'iphone_camera';
+  ui.preferredSource.value = preferredSource;
+  ui.preferredSource.querySelector('option[value="meta_glasses"]').disabled = !nativeGlasses;
+  let nativeCaptureState = 'idle';
+  let nativeCaptureSessionId = null;
+  let nativeCaptureStatus = {};
+  let nativeGateway = '';
+  let nativeConfiguredToken = '';
+  let nativeStartRequested = false;
+  let nativeRetryAfterReturn = false;
+  let nativeStartAttemptAt = 0;
+  let lastNativeUploadedSequence = -1;
+  let lastNativeSavedAt = 0;
+  let browserPauseRequested = false;
   let glassesRequested = false;
   let glassesActive = false;
   let glassesCanvas = null;
@@ -131,6 +156,201 @@
     if (!nativeGlasses) return false;
     try { nativeGlasses.postMessage({action}); return true; }
     catch (error) { ui.glassesStatus.textContent = `Glasses connection failed: ${error.message}`; return false; }
+  }
+
+  function postNativeCapture(payload) {
+    if (!nativeCapture) return false;
+    try { nativeCapture.postMessage(payload); return true; }
+    catch (error) {
+      ui.lifelogStatus.textContent = `Native recording request failed: ${error.message}`;
+      return false;
+    }
+  }
+
+  function configureNativeCapture(websocketAddress) {
+    if (!nativeCapture || !TOKEN_PATTERN.test(token)) return false;
+    try {
+      const address = new URL(websocketAddress);
+      if (address.protocol !== 'wss:' || address.username || address.password) throw new Error('A secure gateway address is required.');
+      const gateway = `https://${address.host}`;
+      if (nativeConfiguredToken === token && nativeGateway === gateway) return true;
+      if (!postNativeCapture({action:'configure', token, gateway})) return false;
+      nativeGateway = gateway;
+      nativeConfiguredToken = token;
+      return true;
+    } catch (error) {
+      ui.lifelogStatus.textContent = `Native configuration failed: ${error.message}`;
+      return false;
+    }
+  }
+
+  async function configureNativeNow() {
+    if (!nativeCapture || !token) return false;
+    if (nativeGateway && nativeConfiguredToken === token) return true;
+    try { return configureNativeCapture(await signalingAddress()); }
+    catch (error) {
+      ui.lifelogStatus.textContent = `Could not find the recording gateway: ${error.message}`;
+      return false;
+    }
+  }
+
+  function phoneHealthField(node, label, condition) {
+    node.textContent = label;
+    node.dataset.status = condition;
+  }
+
+  function refreshPhoneHealth() {
+    const nativeRecording = ['connecting','capturing','paused','uploading'].includes(nativeCaptureState);
+    const frameTime = nativeCaptureStatus.last_frame_at_ms == null
+      ? NaN : Number(nativeCaptureStatus.last_frame_at_ms);
+    const audioTime = nativeCaptureStatus.last_audio_at_ms == null
+      ? NaN : Number(nativeCaptureStatus.last_audio_at_ms);
+    const nativeReceiving = nativeCaptureState === 'capturing' &&
+      Number.isFinite(frameTime) && Date.now() - frameTime < 10000;
+    const browserRecording = recordingActive && callPhase !== 'idle';
+    const browserCall = callPhase !== 'idle';
+    const active = nativeRecording || browserCall;
+    phoneHealthField(ui.nativeConnection,
+      socketReady && desktopOnline ? 'Desktop connected' : lastNativeUploadedSequence >= 0 ? 'Archive acknowledged' :
+      nativeGateway && nativeRecording ? 'Gateway configured' : 'Desktop offline',
+      socketReady && desktopOnline || lastNativeUploadedSequence >= 0 ? 'good' : 'bad');
+    phoneHealthField(ui.nativeReceiving,
+      nativeReceiving ? 'Glasses video arriving' : nativeCaptureState === 'capturing' &&
+      !Number.isFinite(frameTime) ? 'Awaiting first frame' : nativeCaptureState === 'capturing' ? 'Camera frame stale' :
+      nativeCaptureState === 'connecting' ? 'Starting camera' :
+      nativeCaptureState === 'paused' ? 'Paused' : nativeCaptureState === 'uploading' ? 'Uploading' :
+      browserRecording ? 'WebRTC live' : browserCall ? 'Connecting call' : 'Idle',
+      nativeReceiving || browserRecording ? 'good' : nativeCaptureState === 'error' ||
+      nativeCaptureState === 'capturing' && Number.isFinite(frameTime) ? 'bad' : 'idle');
+    phoneHealthField(ui.nativeSaved, lastNativeUploadedSequence >= 0
+      ? `Native segment ${lastNativeUploadedSequence} saved` : browserRecording ? 'Awaiting desktop receipt' : 'No segment confirmation',
+      lastNativeUploadedSequence >= 0 ? 'good' : 'idle');
+    const pending = Number(nativeCaptureStatus.queue_depth);
+    const dropped = Number(nativeCaptureStatus.dropped_frames);
+    if (nativeRecording || nativeCaptureState === 'error') {
+      let detail = `${nativeCaptureState} · ${Number.isFinite(pending) ? pending : '?'} segments queued`;
+      if (Number.isFinite(dropped) && dropped > 0) detail += ` · ${dropped} frames dropped`;
+      if (lastNativeSavedAt) detail += ` · last desktop confirmation ${new Date(lastNativeSavedAt).toLocaleTimeString()}`;
+      if (Number.isFinite(Number(nativeCaptureStatus.received_frames))) {
+        detail += ` · ${Number(nativeCaptureStatus.received_frames)} received frames`;
+      }
+      if (Number.isFinite(audioTime)) {
+        detail += ` · microphone ${Date.now() - audioTime < 6000 ? 'active' : 'stale'}`;
+      } else if (nativeCaptureStatus.audio_source === 'unavailable') {
+        detail += ' · microphone unavailable';
+      }
+      if (nativeCaptureStatus.message) detail += ` · ${nativeCaptureStatus.message}`;
+      if (nativeReceiving && !desktopOnline && pending > 0) detail += ' · Desktop disconnected; capture queue awaiting recovery.';
+      ui.nativeHealthDetails.textContent = detail;
+    } else ui.nativeHealthDetails.textContent = nativeCapture
+      ? 'Native Meta capture can continue through the lock screen.'
+      : 'Browser calls require the phone app to remain active.';
+    ui.recordingChip.hidden = !(recordingActive || nativeRecording);
+    ui.recordingChipText.textContent = nativeRecording ? 'NATIVE CAPTURE' : 'RECORDING';
+    ui.startLifelog.disabled = !token ||
+      (nativeStartRequested && !['paused','error','idle'].includes(nativeCaptureState)) ||
+      (active && nativeCaptureState !== 'paused');
+    ui.pauseLifelog.disabled = !active;
+    ui.pauseLifelog.textContent = nativeCaptureState === 'paused' || browserPauseRequested ? 'Resume' : 'Pause';
+    ui.stopLifelog.disabled = !active;
+    ui.bookmarkLifelog.disabled = !(nativeRecording || browserRecording);
+    ui.preferredSource.disabled = active;
+  }
+
+  window.CalibanNativeCapture = {
+    onStatus(status) {
+      if (!nativeCapture || !status || typeof status !== 'object') return;
+      const next = String(status.state || 'idle');
+      if (!['idle','connecting','capturing','paused','uploading','error'].includes(next)) return;
+      nativeCaptureState = next;
+      nativeCaptureStatus = status;
+      nativeCaptureSessionId = typeof status.session_id === 'string' ? status.session_id : null;
+      if (next === 'capturing' || next === 'paused' || next === 'uploading') {
+        ui.cameraSourceLabel.textContent = 'META GLASSES';
+        const micSource = status.audio_source === 'meta_glasses' ? 'Meta glasses microphone' :
+          status.audio_source === 'iphone_microphone' || status.audio_source === 'iphone' ? 'iPhone microphone' :
+          status.audio_source === 'unavailable' || status.microphone_active === false ? 'microphone unavailable' :
+          'microphone source pending confirmation';
+        ui.recordingNotice.textContent =
+          `Native capture sends Meta glasses video and ${micSource} audio to the desktop.`;
+        ui.recordingNotice.hidden = false;
+      } else if (!recordingActive) ui.recordingNotice.hidden = true;
+      const uploaded = Number(status.last_uploaded_sequence);
+      if (Number.isSafeInteger(uploaded) && uploaded > lastNativeUploadedSequence) {
+        lastNativeUploadedSequence = uploaded;
+        lastNativeSavedAt = Date.now();
+      }
+      if (next === 'capturing' || next === 'uploading') nativeRetryAfterReturn = false;
+      if (next === 'error' && nativeStartRequested) nativeRetryAfterReturn = true;
+      if (next === 'idle' && !nativeStartRequested) nativeRetryAfterReturn = false;
+      ui.lifelogStatus.textContent = status.message || `Native capture ${next}.`;
+      updateDisplay();
+    },
+  };
+
+  async function startLifelogging() {
+    if (!token) return;
+    if (nativeCapture && preferredSource === 'meta_glasses') {
+      if (!await configureNativeNow()) return;
+      if (nativeCaptureState === 'idle' || nativeCaptureState === 'error') {
+        lastNativeUploadedSequence = -1;
+        lastNativeSavedAt = 0;
+      }
+      nativeStartAttemptAt = Date.now();
+      nativeStartRequested = true;
+      nativeRetryAfterReturn = false;
+      if (!postNativeCapture({action: nativeCaptureState === 'paused' ? 'resume' : 'start', source:'meta_glasses'})) {
+        nativeStartRequested = false;
+        return;
+      }
+      ui.lifelogStatus.textContent = 'Starting native glasses capture. The desktop will acknowledge saved segments.';
+      postNativeCapture({action:'status'});
+    } else {
+      if (!socketReady || !desktopOnline) {
+        ui.lifelogStatus.textContent = 'The desktop must connect before a browser call can start.';
+        return;
+      }
+      if (preferredSource === 'meta_glasses' && nativeGlasses && !glassesRequested) ui.glassesButton.click();
+      ui.lifelogStatus.textContent = nativeCapture
+        ? 'Starting the iPhone camera call.'
+        : 'Starting browser capture. Keep Caliban visible to continue sending media.';
+      await callDesktop();
+    }
+    updateDisplay();
+  }
+
+  function pauseLifelogging() {
+    if (nativeCapture && ['capturing','uploading','paused','connecting'].includes(nativeCaptureState)) {
+      const action = nativeCaptureState === 'paused' ? 'resume' : 'pause';
+      if (postNativeCapture({action, source:'meta_glasses'})) ui.lifelogStatus.textContent = `${action} requested; waiting for native confirmation.`;
+    } else if (callPhase !== 'idle') {
+      const action = browserPauseRequested ? 'resume' : 'pause';
+      if (send({type:'record_control', action})) ui.lifelogStatus.textContent = `Browser ${action} requested; awaiting desktop confirmation.`;
+    }
+  }
+
+  function stopLifelogging() {
+    if (nativeCapture && ['connecting','capturing','paused','uploading'].includes(nativeCaptureState)) {
+      if (postNativeCapture({action:'stop',source:'meta_glasses'})) {
+        nativeStartRequested = false;
+        nativeRetryAfterReturn = false;
+        ui.lifelogStatus.textContent = 'Stopping native capture and completing queued desktop uploads.';
+      }
+    } else if (callPhase !== 'idle') endCall(true);
+    updateDisplay();
+  }
+
+  function bookmarkLifelogging() {
+    const note = ui.bookmarkNote.value.trim();
+    let requested = false;
+    if (nativeCapture && ['capturing','paused','uploading'].includes(nativeCaptureState)) {
+      requested = postNativeCapture({action:'bookmark',source:'meta_glasses',note});
+    } else if (callPhase !== 'idle' && recordingActive) {
+      requested = send({type:'bookmark',session_id:recordingSessionId,
+                        captured_at:new Date().toISOString(),kind:'manual',note});
+    }
+    if (requested) ui.lifelogStatus.textContent = 'Bookmark submitted; awaiting saved confirmation from Caliban.';
+    else ui.lifelogStatus.textContent = 'A recording must be active before a bookmark can be saved.';
   }
 
   function glassesInfo(text) {
@@ -731,7 +951,8 @@
     ui.controls.hidden = !busy;
     ui.callButton.hidden = busy;
     ui.hangupButton.hidden = !busy;
-    ui.callButton.disabled = !socketReady || !desktopOnline || busy;
+    ui.callButton.disabled = !socketReady || !desktopOnline || busy ||
+      ['connecting','capturing','paused','uploading'].includes(nativeCaptureState);
     ui.muteButton.disabled = !localStream;
     ui.videoButton.disabled = !localStream || localStream.getVideoTracks().length === 0;
     ui.flipButton.disabled = glassesRequested || !localStream || cameraDisabled || localStream.getVideoTracks().length === 0;
@@ -754,8 +975,10 @@
         ui.localVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA);
     } else {
       ui.stageCenter.classList.remove('in-call');
-      ui.stageTitle.textContent = 'Phone camera standby';
-      ui.stageMessage.textContent = paired
+      ui.stageTitle.textContent = ['capturing','connecting','paused','uploading'].includes(nativeCaptureState)
+        ? `Native capture ${nativeCaptureState}` : 'Phone camera standby';
+      ui.stageMessage.textContent = ['capturing','connecting','paused','uploading'].includes(nativeCaptureState)
+        ? 'Meta glasses video and audio are handled by the native iPhone recorder.' : paired
         ? (desktopOnline ? 'Call Caliban to send live camera video and microphone audio.' : 'Open Caliban on your desktop to start a call.')
         : 'Pair your iPhone to share camera video and spoken dialogue during a call.';
       ui.callDescription.textContent = socketReady
@@ -764,8 +987,10 @@
     }
     if (!paired) status('Not paired');
     else if (busy) status(callPhase === 'connected' ? 'On a call' : 'Connecting', callPhase === 'connected' ? 'online' : 'calling');
+    else if (['capturing','connecting','paused','uploading'].includes(nativeCaptureState)) status('Native lifelog', 'online');
     else if (socketReady) status(desktopOnline ? 'Desktop online' : 'Desktop offline', desktopOnline ? 'online' : 'offline');
     else status('Reconnecting', 'offline');
+    refreshPhoneHealth();
   }
 
   function setDesktopOnline(online) {
@@ -876,6 +1101,7 @@
     }
     if (!token || token !== pairingAtStart ||
         (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) return;
+    configureNativeCapture(address);
     const connection = new WebSocket(address);
     ws = connection;
 
@@ -953,7 +1179,31 @@
         break;
       }
       case 'recording': {
+        browserPauseRequested = message.paused === true;
         setRecording(message.active ?? message.recording ?? false, message.session_id);
+        break;
+      }
+      case 'record_control': {
+        browserPauseRequested = message.paused === true;
+        updateDisplay();
+        break;
+      }
+      case 'bookmark_saved': {
+        ui.lifelogStatus.textContent = `Bookmark saved at ${new Date(message.bookmark?.marked_at_utc || message.captured_at || Date.now()).toLocaleTimeString()}; previous 30 seconds indexed.`;
+        ui.bookmarkNote.value = '';
+        break;
+      }
+      case 'native_segment_saved': {
+        const sequence = Number(message.sequence);
+        if (Number.isSafeInteger(sequence) && sequence > lastNativeUploadedSequence) {
+          lastNativeUploadedSequence = sequence;
+          lastNativeSavedAt = Date.now();
+        }
+        refreshPhoneHealth();
+        break;
+      }
+      case 'native_gap': {
+        ui.lifelogStatus.textContent = `Recording gap reported: ${message.reason || 'capture discontinuity'}.`;
         break;
       }
       case 'transcription_status': {
@@ -1366,6 +1616,12 @@
     connect();
   });
   ui.unpairButton.addEventListener('click', () => {
+    if (nativeCapture && nativeCaptureState !== 'idle') postNativeCapture({action:'stop',source:'meta_glasses'});
+    nativeStartRequested = false;
+    nativeRetryAfterReturn = false;
+    nativeGateway = '';
+    nativeConfiguredToken = '';
+    lastNativeUploadedSequence = -1;
     endCall(true);
     if (ws) { const current = ws; ws = null; current.close(); }
     clearTimeout(reconnectTimer);
@@ -1379,7 +1635,35 @@
     ui.pairToken.value = '';
     ui.pairToken.focus();
   });
-  ui.callButton.addEventListener('click', callDesktop);
+  ui.callButton.addEventListener('click', () => {
+    if (preferredSource === 'meta_glasses' && nativeGlasses && !glassesRequested) ui.glassesButton.click();
+    void callDesktop();
+  });
+  ui.preferredSource.addEventListener('change', () => {
+    if (!['meta_glasses','iphone_camera'].includes(ui.preferredSource.value)) return;
+    preferredSource = ui.preferredSource.value;
+    try { localStorage.setItem(SOURCE_KEY, preferredSource); }
+    catch { /* Persistence can be unavailable in private sessions. */ }
+    ui.lifelogStatus.textContent = `Preferred source saved: ${preferredSource === 'meta_glasses' ? 'Meta glasses' : 'iPhone camera'}.`;
+  });
+  ui.startLifelog.addEventListener('click', () => { void startLifelogging(); });
+  ui.pauseLifelog.addEventListener('click', pauseLifelogging);
+  ui.stopLifelog.addEventListener('click', stopLifelogging);
+  ui.bookmarkLifelog.addEventListener('click', bookmarkLifelogging);
+  ui.bookmarkNote.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); bookmarkLifelogging(); }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey ||
+        event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    if (event.altKey && event.key.toLowerCase() === 'l' && !ui.startLifelog.disabled) {
+      event.preventDefault(); ui.startLifelog.click();
+    } else if (event.altKey && event.key.toLowerCase() === 'p' && !ui.pauseLifelog.disabled) {
+      event.preventDefault(); ui.pauseLifelog.click();
+    } else if (event.altKey && event.key.toLowerCase() === 'b' && !ui.bookmarkLifelog.disabled) {
+      event.preventDefault(); ui.bookmarkLifelog.click();
+    }
+  });
   ui.hangupButton.addEventListener('click', () => { endCall(true); displayError(''); });
   ui.muteButton.addEventListener('click', toggleMic);
   ui.videoButton.addEventListener('click', toggleCamera);
@@ -1396,6 +1680,17 @@
   window.addEventListener('online', () => { if (token) connect(); });
   window.addEventListener('offline', () => { status('Offline'); });
   function resumeConnection() {
+    if (nativeCapture && token) {
+      postNativeCapture({action:'status'});
+      if (nativeStartRequested && nativeRetryAfterReturn && document.visibilityState !== 'hidden' &&
+          Date.now() - nativeStartAttemptAt > 4000) {
+        nativeStartAttemptAt = Date.now();
+        nativeRetryAfterReturn = false;
+        void configureNativeNow().then(ready => {
+          if (ready && nativeStartRequested) postNativeCapture({action:'start',source:'meta_glasses'});
+        });
+      }
+    }
     if (!token || document.visibilityState === 'hidden') return;
     const now = Date.now();
     if (now - lastResumeAt < 1500) return;

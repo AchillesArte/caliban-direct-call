@@ -26,7 +26,7 @@
       <div class="stage-art" aria-hidden="true"><div class="circle"><svg viewBox="0 0 64 64"><path d="M16 19h32v26H16z M26 19v-6h12v6 M25 45v7 M39 45v7 M24 29h16 M24 35h16"/></svg></div></div>
       <div class="stage-top">
         <span class="glass-chip"><svg viewBox="0 0 24 24"><path d="M4 17v-9l8-5 8 5v9l-8 5z M9 12l3 3 5-6"/></svg> <span id="cameraSourceLabel">PHONE CAMERA</span></span>
-        <span class="glass-chip recording" id="recordingChip" hidden><span class="record-dot"></span> SAVING STILLS</span>
+        <span class="glass-chip recording" id="recordingChip" hidden><span class="record-dot"></span><span id="recordingChipText">SAVING STILLS</span></span>
       </div>
       <div class="stage-center" id="stageCenter"><h2 id="stageTitle">Phone camera standby</h2><p id="stageMessage">Pair your iPhone, then start a call to send continuous video and microphone audio.</p></div>
       <div class="local-wrap" id="localWrap"><video id="localVideo" class="local-video" muted autoplay playsinline></video><span class="local-label">CAMERA PREVIEW</span></div>
@@ -62,8 +62,16 @@
           <p>The iPhone camera remains available during a glasses connection failure.</p>
         </div>
       </details>
-      <p class="glasses-status">During a call, Caliban streams live video from the selected camera and microphone audio. Active lifelog recording archives periodic stills and transcribed speech. End the call to stop.</p>
-      <div class="call-actions"><button id="callButton" class="primary" disabled><svg viewBox="0 0 24 24"><rect x="3" y="6" width="14" height="12" rx="3"/><path d="m17 10 4-3v10l-4-3"/></svg><span>Start call</span></button><button id="hangupButton" class="hangup" hidden><svg viewBox="0 0 24 24"><path d="M3 16.5a16 16 0 0 1 18 0l-3.5 4-3-2.3v-3.1a9 9 0 0 0-5 0v3.1l-3 2.3z"/></svg>End call</button></div>
+      <label for="preferredSource" class="eyebrow source-choice-label">Preferred camera</label>
+      <select id="preferredSource" class="source-select"><option value="meta_glasses">Meta glasses camera and microphone</option><option value="iphone_camera">iPhone camera and microphone</option></select>
+      <p class="glasses-status">Caliban remembers this source. Native Meta capture saves its original camera feed and audio directly to your desktop, including when the phone is locked.</p>
+      <div class="lifelog-actions"><button id="startLifelog" class="primary" type="button" disabled>Start lifelogging</button><button id="pauseLifelog" class="secondary" type="button" disabled>Pause</button><button id="bookmarkLifelog" class="secondary" type="button" disabled>Bookmark previous 30 s</button><button id="stopLifelog" class="secondary" type="button" disabled>Stop</button></div>
+      <label class="eyebrow source-choice-label" for="bookmarkNote">Bookmark note (optional)</label>
+      <input id="bookmarkNote" class="token-field bookmark-field" type="text" maxlength="120" placeholder="A person, idea, or moment">
+      <p id="lifelogStatus" class="glasses-status" role="status" aria-live="polite">Ready to start a saved session. Native shortcuts: Siri Start, Pause and Bookmark.</p>
+      <div class="phone-record-health" role="group" aria-label="Recording health"><div><span>Connection</span><strong id="nativeConnection">Waiting</strong></div><div><span>Receiving</span><strong id="nativeReceiving">Idle</strong></div><div><span>Saved on disk</span><strong id="nativeSaved">No segments yet</strong></div></div>
+      <p id="nativeHealthDetails" class="glasses-status" role="status" aria-live="polite">Recording health will appear when capture begins.</p>
+      <details class="glasses-choice"><summary>Browser call fallback</summary><div class="call-actions"><button id="callButton" class="secondary" disabled><svg viewBox="0 0 24 24"><rect x="3" y="6" width="14" height="12" rx="3"/><path d="m17 10 4-3v10l-4-3"/></svg><span>Start browser call</span></button><button id="hangupButton" class="hangup" hidden><svg viewBox="0 0 24 24"><path d="M3 16.5a16 16 0 0 1 18 0l-3.5 4-3-2.3v-3.1a9 9 0 0 0-5 0v3.1l-3 2.3z"/></svg>End call</button></div></details>
     </section>
 
     <nav class="controls" aria-label="Call controls" id="controls" hidden>
