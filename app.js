@@ -40,6 +40,7 @@
     captionPlaceholder: $('captionPlaceholder'), copyCaptions: $('copyCaptions'),
     glassesPanel: $('glassesPanel'), glassesButton: $('glassesButton'), glassesConnect: $('glassesConnect'), glassesStatus: $('glassesStatus'),
     glassesUpdate: $('glassesUpdate'), glassesUpdateHelp: $('glassesUpdateHelp'),
+    glassesFirmwareUpdate: $('glassesFirmwareUpdate'), glassesFirmwareHelp: $('glassesFirmwareHelp'),
     glassesRecovery: $('glassesRecovery'), cameraSourceLabel: $('cameraSourceLabel'),
   };
 
@@ -97,8 +98,10 @@
   let phoneCameraTrack = null;
   let glassesFrameBusy = false;
   let glassesFrameLastAt = 0;
+  let glassesFrameObservedAtMs = null;
   let glassesStatus = 'idle';
   let glassesNeedsDatUpdate = false;
+  let glassesNeedsFirmwareUpdate = false;
   let glassesSwitching = Promise.resolve();
   let glassesSwitchQueued = false;
   let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
@@ -115,6 +118,8 @@
     ui.glassesConnect.hidden = true;
     ui.glassesUpdate.hidden = true;
     ui.glassesUpdateHelp.hidden = true;
+    ui.glassesFirmwareUpdate.hidden = true;
+    ui.glassesFirmwareHelp.hidden = true;
     ui.glassesStatus.textContent = 'Meta glasses video requires the native Caliban iPhone app. Safari and Home Screen web apps cannot access the Meta Wearables camera SDK.';
   } else {
     // Keep the live Bluetooth permission and Meta connection diagnostics
@@ -138,13 +143,15 @@
     ui.glassesButton.textContent = glassesRequested && glassesStatus === 'connecting'
       ? 'Cancel Meta camera connection'
       : glassesRequested ? 'Use iPhone camera'
-      : ['error', 'dat_update_required'].includes(glassesStatus) ? 'Retry Meta glasses camera' : 'Use Meta glasses camera';
+      : ['error', 'dat_update_required', 'firmware_update_required'].includes(glassesStatus) ? 'Retry Meta glasses camera' : 'Use Meta glasses camera';
     // A native Meta discovery or camera-permission prompt may stall. Keep the
     // cancellation action available so the user can stop it immediately.
     ui.glassesButton.disabled = glassesStatus === 'connecting' && !glassesRequested;
-    ui.glassesRecovery.hidden = !['error', 'dat_update_required'].includes(glassesStatus);
+    ui.glassesRecovery.hidden = !['error', 'dat_update_required', 'firmware_update_required'].includes(glassesStatus);
     ui.glassesUpdate.hidden = glassesStatus !== 'dat_update_required';
     ui.glassesUpdateHelp.hidden = !glassesNeedsDatUpdate;
+    ui.glassesFirmwareUpdate.hidden = glassesStatus !== 'firmware_update_required';
+    ui.glassesFirmwareHelp.hidden = !glassesNeedsFirmwareUpdate;
     ui.flipButton.disabled = glassesRequested || !localStream || cameraDisabled || localStream.getVideoTracks().length === 0;
   }
 
@@ -410,6 +417,7 @@
     glassesRequested = false;
     glassesStatus = 'idle';
     glassesNeedsDatUpdate = false;
+    glassesNeedsFirmwareUpdate = false;
     updateGlassesButton();
     postGlasses('stop');
     await restorePhoneMicrophone();
@@ -422,13 +430,15 @@
   window.CalibanGlassesBridge = {
     onStatus(state, message) {
       if (!nativeGlasses) return;
-      glassesStatus = ['connecting', 'streaming', 'idle', 'error', 'dat_update_required'].includes(state) ? state : 'idle';
+      glassesStatus = ['connecting', 'streaming', 'idle', 'error', 'dat_update_required', 'firmware_update_required'].includes(state) ? state : 'idle';
       glassesNeedsDatUpdate = glassesStatus === 'dat_update_required' ||
         (glassesStatus === 'error' && typeof message === 'string' && message.includes('The DAT app on the glasses needs an update'));
-      if (glassesStatus === 'error' || glassesStatus === 'dat_update_required') ui.glassesPanel.open = true;
+      glassesNeedsFirmwareUpdate = glassesStatus === 'firmware_update_required' ||
+        (glassesStatus === 'error' && typeof message === 'string' && message.includes('firmware update'));
+      if (['error', 'dat_update_required', 'firmware_update_required'].includes(glassesStatus)) ui.glassesPanel.open = true;
       // A native stop can occur during an iOS app switch, before the glasses
       // have sent their first frame. Clear the pending choice in that case too.
-      if (glassesStatus === 'error' || glassesStatus === 'dat_update_required' || glassesStatus === 'idle') {
+      if (['error', 'dat_update_required', 'firmware_update_required', 'idle'].includes(glassesStatus)) {
         void restorePhoneMicrophone();
         if (glassesRequested) {
           glassesRequested = false;
@@ -442,7 +452,7 @@
         : (typeof message === 'string' && message ? message : `Meta glasses: ${glassesStatus}`));
       updateGlassesButton();
     },
-    onFrame(base64Jpeg) {
+    onFrame(base64Jpeg, observedAtMs) {
       if (!nativeGlasses || !glassesRequested || typeof base64Jpeg !== 'string' ||
           base64Jpeg.length > 350000 || glassesFrameBusy) return false;
       glassesFrameBusy = true;
@@ -463,6 +473,11 @@
           if (!context) throw new Error('Camera canvas unavailable.');
           context.drawImage(frame, 0, 0);
           glassesFrameLastAt = Date.now();
+          // The native SDK callback gives the time at which it observed the
+          // image, before JPEG encoding and WebKit transport. A delayed frame
+          // never acquires the time of a later phone/desktop save operation.
+          glassesFrameObservedAtMs = Number.isSafeInteger(observedAtMs) &&
+            Math.abs(glassesFrameLastAt - observedAtMs) < 120000 ? observedAtMs : null;
           if (!glassesTrack) {
             if (typeof glassesCanvas.captureStream !== 'function') throw new Error('This iOS WebView cannot transmit canvas video.');
             createGlassesCanvasTrack();
@@ -498,6 +513,7 @@
     glassesRequested = true;
     glassesStatus = 'connecting';
     glassesNeedsDatUpdate = false;
+    glassesNeedsFirmwareUpdate = false;
     ui.glassesRecovery.hidden = true;
     glassesInfo('Connecting to the Meta glasses through the Meta AI app…');
     updateGlassesButton();
@@ -516,6 +532,11 @@
     if (!nativeGlasses) return;
     glassesInfo('Opening the DAT app update screen in Meta AI…');
     postGlasses('update-dat');
+  });
+  ui.glassesFirmwareUpdate.addEventListener('click', () => {
+    if (!nativeGlasses) return;
+    glassesInfo('Opening Meta AI to update the glasses firmware…');
+    postGlasses('update-firmware');
   });
 
   function resetCaptions() {
@@ -579,18 +600,21 @@
     let width;
     let height;
     let cameraSource;
+    let observedAtMs;
     if (glassesActive && activeTrack === glassesTrack) {
       if (!glassesCanvas || Date.now() - glassesFrameLastAt > 5000) return;
       source = glassesCanvas;
       width = source.width;
       height = source.height;
       cameraSource = 'meta_glasses';
+      observedAtMs = glassesFrameObservedAtMs ?? glassesFrameLastAt;
     } else if (!glassesActive && activeTrack === phoneCameraTrack) {
       source = ui.localVideo;
       if (source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
       width = source.videoWidth;
       height = source.videoHeight;
       cameraSource = 'iphone_camera';
+      observedAtMs = Date.now();
     } else return; // A camera source is changing; never upload a stale frame.
     if (!width || !height) return;
     const maxWidth = width >= height ? 1280 : 720;
@@ -617,7 +641,8 @@
       }
       if (!encoded || encoded.length > MAX_JPEG_BASE64_LENGTH) return;
       send({type:'frame', data:encoded, camera_source:cameraSource,
-            camera_facing:cameraSource === 'iphone_camera' ? cameraFacing : null});
+            camera_facing:cameraSource === 'iphone_camera' ? cameraFacing : null,
+            captured_at_ms: observedAtMs});
     } catch (error) {
       console.warn('Could not capture the selected phone camera', error);
     }
@@ -1236,6 +1261,7 @@
     glassesTrack = null;
     glassesFrameRequester = null;
     glassesCanvas = null;
+    glassesFrameObservedAtMs = null;
     glassesActive = false;
     ui.cameraSourceLabel.textContent = 'PHONE CAMERA';
     glassesRequested = false;
