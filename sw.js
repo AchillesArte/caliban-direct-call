@@ -1,10 +1,11 @@
 /* Offline app shell only. Calls always require an active secure connection. */
-const CACHE_VERSION = 'caliban-phone-v12';
+const CACHE_VERSION = 'caliban-phone-v14';
 const SHELL = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './glasses-audio.js',
   './manifest.webmanifest',
   './icon.svg',
   './icon-192.png',
@@ -29,7 +30,7 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin || !url.pathname.startsWith(new URL(self.registration.scope).pathname)) return;
   // Never cache signalling, media, API requests, credentials, or call responses.
   const filename = url.pathname.slice(new URL(self.registration.scope).pathname.length);
-  if (!['', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'].includes(filename)) return;
+  if (!['', 'index.html', 'style.css', 'app.js', 'glasses-audio.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'].includes(filename)) return;
   event.respondWith(
     fetch(request).then(response => {
       if (response.ok) {

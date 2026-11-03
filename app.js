@@ -7,8 +7,22 @@
   const TOKEN_PATTERN = /^[a-fA-F0-9]{64}$/;
   const WEBSOCKET_OPEN = 1;
   const FRAME_INTERVAL_MS = 3000;
+  const GLASSES_VIDEO_FPS = 30;
+  const GLASSES_AUDIO_STALE_MS = 1800;
   const MAX_WS_BUFFERED_BYTES = 2 * 1024 * 1024;
   const MAX_JPEG_BASE64_LENGTH = 800 * 1024;
+
+  function phoneVideoConstraints(facingMode) {
+    // Prefer the same portrait dimensions as Meta DAT's high resolution feed.
+    // Every numeric field is ideal, so cameras without this mode can still open.
+    return {
+      facingMode: {ideal:facingMode},
+      width: {ideal:720},
+      height: {ideal:1280},
+      aspectRatio: {ideal:9/16},
+      frameRate: {ideal:GLASSES_VIDEO_FPS},
+    };
+  }
 
   const ui = {
     connectionChip: $('connectionChip'), connectionText: $('connectionText'),
@@ -61,7 +75,15 @@
   // A persistent outbound video sender lets the call change cameras without
   // requiring another SDP negotiation, including after an audio-only start.
   let videoSender = null;
+  let audioSender = null;
   let localStream = null;
+  let phoneMicTrack = null;
+  let glassesAudioTrack = null;
+  let glassesAudioLastAt = 0;
+  let glassesAudioSelected = false;
+  let glassesAudioSampleRate = null;
+  let glassesAudioSwitching = Promise.resolve();
+  let glassesAudioWatchdog = null;
   let remoteStream = null;
   // The Meta DAT SDK runs in the native iOS wrapper. Safari cannot see its
   // camera as a getUserMedia device; native JPEGs are drawn into this track.
@@ -133,6 +155,116 @@
     return glassesSwitching;
   }
 
+  // DAT's audioFramePublisher supplies the actual glasses microphone. The
+  // separate audio module buffers and resamples PCM into a real WebRTC track.
+  function prepareGlassesAudio() {
+    if (!nativeGlasses || !window.CalibanGlassesAudio) return false;
+    try {
+      glassesAudioTrack = window.CalibanGlassesAudio.start({sampleRate:48000,channelCount:1});
+      if (glassesAudioTrack) glassesAudioTrack.enabled = !microphoneMuted;
+      // Called from the user's Start Call or Use Meta glasses tap to permit
+      // WebKit audio-context activation; failure preserves the phone mic.
+      void window.CalibanGlassesAudio.resume().catch(() => {});
+      return Boolean(glassesAudioTrack);
+    } catch (error) {
+      console.warn('Meta glasses audio output unavailable', error);
+      return false;
+    }
+  }
+
+  // The receiver distinguishes native glasses microphone audio from the
+  // always-available iPhone fallback by the track actually selected.
+  function reportMediaSources() {
+    if (!socketReady || callPhase === 'idle') return;
+    send({
+      type: 'source_status',
+      camera_source: glassesActive ? 'meta_glasses' : 'iphone_camera',
+      audio_source: glassesAudioSelected ? 'meta_glasses' : 'iphone_microphone',
+      sample_rate: glassesAudioSelected ? glassesAudioSampleRate : null,
+    });
+  }
+
+  function preferFullResolutionVideo() {
+    if (!videoSender || !glassesActive) return;
+    try {
+      if (glassesTrack) glassesTrack.contentHint = 'detail';
+      const parameters = videoSender.getParameters();
+      if (parameters.encodings?.length) {
+        parameters.degradationPreference = 'maintain-resolution';
+        for (const encoding of parameters.encodings) {
+          encoding.maxBitrate = 8_000_000;
+          encoding.maxFramerate = GLASSES_VIDEO_FPS;
+          encoding.scaleResolutionDownBy = 1;
+        }
+        void videoSender.setParameters(parameters).catch(() => {});
+      }
+    } catch (_) { /* Older WebKit releases use the browser's defaults. */ }
+  }
+
+  function switchMicrophone(track) {
+    const connection = peer;
+    const sender = audioSender;
+    if (!sender || !track) return Promise.resolve();
+    glassesAudioSwitching = glassesAudioSwitching.catch(() => {}).then(async () => {
+      if (connection !== peer || sender !== audioSender || !localStream) return;
+      await sender.replaceTrack(track);
+      if (connection !== peer || sender !== audioSender || !localStream) return;
+      glassesAudioSelected = track === glassesAudioTrack;
+      reportMediaSources();
+      if (glassesActive && glassesRequested) glassesInfo(glassesAudioSelected
+        ? 'Meta glasses camera and microphone are sending live video and audio to Caliban.'
+        : 'Meta glasses camera is live. The iPhone microphone supplies audio.');
+    }).catch(error => {
+      glassesInfo(`Microphone source switch failed: ${error.message}. Using the available audio source.`);
+    });
+    return glassesAudioSwitching;
+  }
+
+  function restorePhoneMicrophone() {
+    window.CalibanGlassesAudio?.silence();
+    glassesAudioLastAt = 0;
+    glassesAudioSampleRate = null;
+    return phoneMicTrack ? switchMicrophone(phoneMicTrack) : Promise.resolve();
+  }
+
+  function stopGlassesAudio() {
+    clearInterval(glassesAudioWatchdog);
+    glassesAudioWatchdog = null;
+    glassesAudioSelected = false;
+    glassesAudioLastAt = 0;
+    glassesAudioSampleRate = null;
+    window.CalibanGlassesAudio?.stop();
+    glassesAudioTrack = null;
+  }
+
+  function receiveGlassesAudio(base64PCM, sampleRate) {
+    if (!nativeGlasses || !glassesRequested || !localStream || callPhase === 'idle' ||
+        ![16000, 44100, 48000].includes(sampleRate) || typeof base64PCM !== 'string' ||
+        !window.CalibanGlassesAudio || !glassesAudioTrack) return false;
+    try {
+      if (window.CalibanGlassesAudio.context?.state !== 'running') {
+        void window.CalibanGlassesAudio.resume().catch(() => {});
+        return false;
+      }
+      if (!window.CalibanGlassesAudio.pushFrame(base64PCM, {sampleRate,channelCount:1})) return false;
+      glassesAudioLastAt = Date.now();
+      glassesAudioSampleRate = sampleRate;
+      if (glassesActive && !glassesAudioSelected && audioSender && glassesAudioTrack &&
+          audioSender.track !== glassesAudioTrack) void switchMicrophone(glassesAudioTrack);
+      if (!glassesAudioWatchdog) {
+        glassesAudioWatchdog = setInterval(() => {
+          if (glassesAudioSelected && Date.now() - glassesAudioLastAt > GLASSES_AUDIO_STALE_MS) {
+            void restorePhoneMicrophone();
+          }
+        }, 500);
+      }
+      return true;
+    } catch (error) {
+      console.warn('Meta glasses PCM could not be decoded', error);
+      return false;
+    }
+  }
+
   async function useGlassesTrack() {
     if (!glassesRequested || !glassesTrack || !localStream || callPhase === 'idle' || glassesActive) return;
     const existing = localStream.getVideoTracks()[0] || null;
@@ -153,13 +285,16 @@
     ui.localVideo.classList.add('back-camera');
     void ui.localVideo.play().catch(() => {});
     glassesActive = true;
+    preferFullResolutionVideo();
     audioOnly = false;
     ui.cameraSourceLabel.textContent = 'META GLASSES';
-    glassesInfo('Meta glasses camera is sending live video to Caliban. Your iPhone microphone remains active.');
+    glassesInfo('Meta glasses camera is sending live video to Caliban. Audio uses the glasses microphone when available, with iPhone fallback.');
+    reportMediaSources();
     updateDisplay();
   }
 
   async function usePhoneTrack() {
+    await restorePhoneMicrophone();
     if (!localStream) {
       glassesActive = false;
       ui.cameraSourceLabel.textContent = 'PHONE CAMERA';
@@ -174,7 +309,7 @@
     let createdReplacement = false;
     if (!replacement) {
       try {
-        const phone = await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:cameraFacing}}});
+        const phone = await navigator.mediaDevices.getUserMedia({audio:false,video:phoneVideoConstraints(cameraFacing)});
         replacement = phone.getVideoTracks()[0];
         createdReplacement = Boolean(replacement);
       } catch (error) { glassesInfo(`Phone camera unavailable: ${error.message}`); }
@@ -212,6 +347,7 @@
     glassesActive = false;
     audioOnly = false;
     ui.cameraSourceLabel.textContent = 'PHONE CAMERA';
+    reportMediaSources();
     ui.localVideo.srcObject = localStream;
     ui.localVideo.classList.toggle('back-camera', cameraFacing === 'environment');
     void ui.localVideo.play().catch(() => {});
@@ -224,6 +360,7 @@
     glassesNeedsDatUpdate = false;
     updateGlassesButton();
     postGlasses('stop');
+    await restorePhoneMicrophone();
     await scheduleGlassesSwitch(usePhoneTrack);
     glassesInfo('Using the iPhone camera.');
   }
@@ -240,13 +377,16 @@
       // A native stop can occur during an iOS app switch, before the glasses
       // have sent their first frame. Clear the pending choice in that case too.
       if (glassesStatus === 'error' || glassesStatus === 'dat_update_required' || glassesStatus === 'idle') {
+        void restorePhoneMicrophone();
         if (glassesRequested) {
           glassesRequested = false;
           void scheduleGlassesSwitch(usePhoneTrack);
         }
       }
       glassesInfo(glassesStatus === 'streaming' && glassesActive
-        ? 'Meta glasses camera is sending live video to Caliban. Your iPhone microphone remains active.'
+        ? (glassesAudioSelected
+          ? 'Meta glasses camera and microphone are sending live video and audio to Caliban.'
+          : 'Meta glasses camera is live. Audio uses the glasses microphone when available, with iPhone fallback.')
         : (typeof message === 'string' && message ? message : `Meta glasses: ${glassesStatus}`));
       updateGlassesButton();
     },
@@ -273,9 +413,10 @@
           glassesFrameLastAt = Date.now();
           if (!glassesTrack) {
             if (typeof glassesCanvas.captureStream !== 'function') throw new Error('This iOS WebView cannot transmit canvas video.');
-            glassesStream = glassesCanvas.captureStream(15);
+            glassesStream = glassesCanvas.captureStream(GLASSES_VIDEO_FPS);
             glassesTrack = glassesStream.getVideoTracks()[0] || null;
             if (!glassesTrack) throw new Error('No video track could be created for the glasses.');
+            glassesTrack.contentHint = 'detail';
           }
           if (callPhase !== 'idle' && localStream && !glassesActive && !glassesSwitchQueued) {
             glassesSwitchQueued = true;
@@ -295,11 +436,15 @@
       frame.src = `data:image/jpeg;base64,${base64Jpeg}`;
       return true;
     },
+    onAudio(base64PCM, sampleRate) {
+      return receiveGlassesAudio(base64PCM, sampleRate);
+    },
   };
 
   ui.glassesButton.addEventListener('click', () => {
     if (!nativeGlasses) return;
     if (glassesRequested) { void disableGlasses(); return; }
+    prepareGlassesAudio();
     glassesRequested = true;
     glassesStatus = 'connecting';
     glassesNeedsDatUpdate = false;
@@ -568,6 +713,7 @@
     ui.recordingChip.hidden = !recordingActive;
     ui.recordingNotice.hidden = !recordingActive;
     if (recordingActive) {
+      reportMediaSources();
       if (!wasRecording) resetCaptions();
       ui.captionStatus.textContent = 'Listening; recognised speech appears after short audio segments.';
       ui.recordingNotice.textContent = 'Lifelogging active: live camera video is sent to your desktop, with audio transcription and periodic still images archived.';
@@ -829,7 +975,7 @@
         audio: true,
         // A glasses video track already exists. Keep only the phone microphone
         // active, avoiding needless activation of the iPhone camera.
-        video: glassesReady ? false : { facingMode: 'user' },
+        video: glassesReady ? false : phoneVideoConstraints('user'),
       });
     } catch (error) {
       if (!['NotAllowedError', 'NotFoundError', 'NotReadableError', 'AbortError', 'OverconstrainedError'].includes(error.name)) throw error;
@@ -843,6 +989,7 @@
       return false;
     }
     localStream = stream;
+    phoneMicTrack = stream.getAudioTracks()[0] || null;
     phoneCameraTrack = stream.getVideoTracks()[0] || null;
     microphoneMuted = false;
     cameraDisabled = false;
@@ -913,10 +1060,32 @@
     // The negotiated video transceiver carries a continuous camera feed.
     // Keep a sender even if no camera was available at call setup; the owner
     // can select the phone or Meta camera later using replaceTrack().
-    localStream.getAudioTracks().forEach(track => connection.addTrack(track, localStream));
+    if (phoneMicTrack) audioSender = connection.addTrack(phoneMicTrack, localStream);
     const selectedVideo = localStream.getVideoTracks().find(track => track.readyState === 'live');
-    const options = selectedVideo ? {direction:'sendonly', streams:[localStream]} : {direction:'sendonly'};
-    videoSender = connection.addTransceiver(selectedVideo || 'video', options).sender;
+    const options = {
+      direction: 'sendonly',
+      sendEncodings: [{maxBitrate:8_000_000, maxFramerate:GLASSES_VIDEO_FPS, scaleResolutionDownBy:1}],
+      ...(selectedVideo ? {streams:[localStream]} : {}),
+    };
+    try {
+      videoSender = connection.addTransceiver(selectedVideo || 'video', options).sender;
+    } catch (_) {
+      // Some Safari versions do not implement addTransceiver sendEncodings.
+      delete options.sendEncodings;
+      videoSender = connection.addTransceiver(selectedVideo || 'video', options).sender;
+    }
+    // Keep the 720p/30fps Meta feed unscaled when browser and link permit it.
+    // Unsupported WebKit settings simply retain congestion-controlled defaults.
+    try {
+      const parameters = videoSender.getParameters();
+      if (parameters.encodings?.length) {
+        parameters.degradationPreference = 'maintain-resolution';
+        parameters.encodings[0].maxBitrate = 8_000_000;
+        parameters.encodings[0].maxFramerate = GLASSES_VIDEO_FPS;
+        parameters.encodings[0].scaleResolutionDownBy = 1;
+        void videoSender.setParameters(parameters).catch(() => {});
+      }
+    } catch (_) { /* Browser applies its default quality controls. */ }
     return connection;
   }
 
@@ -947,6 +1116,7 @@
   async function callDesktop() {
     if (!socketReady || !desktopOnline || callPhase !== 'idle') return;
     displayError('');
+    if (glassesRequested) prepareGlassesAudio();
     const currentSession = ++sessionNumber;
     callPhase = 'preparing';
     updateDisplay();
@@ -1003,6 +1173,9 @@
     }
     peer = null;
     videoSender = null;
+    audioSender = null;
+    phoneMicTrack = null;
+    stopGlassesAudio();
     pendingCandidates = [];
     if (localStream) localStream.getTracks().forEach(track => track.stop());
     localStream = null;
@@ -1046,6 +1219,7 @@
     if (!localStream) return;
     microphoneMuted = !microphoneMuted;
     localStream.getAudioTracks().forEach(track => { track.enabled = !microphoneMuted; });
+    if (glassesAudioTrack) glassesAudioTrack.enabled = !microphoneMuted;
     updateControls();
   }
 
@@ -1067,7 +1241,7 @@
     previous.stop();
     let replacement = null;
     try {
-      const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: nextFacing } }, audio: false });
+      const videoStream = await navigator.mediaDevices.getUserMedia({ video: phoneVideoConstraints(nextFacing), audio: false });
       replacement = videoStream.getVideoTracks()[0];
       if (!replacement) throw new Error('No video track returned');
       if (!localStream || callPhase === 'idle') { replacement.stop(); return; }
@@ -1085,7 +1259,7 @@
       displayError(`Camera switch failed: ${error.message}. Tap Camera to retry if the video stopped.`);
       // Restore a usable camera when switching fails after Safari releases it.
       try {
-        const restored = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: cameraFacing } }, audio: false });
+        const restored = await navigator.mediaDevices.getUserMedia({ video: phoneVideoConstraints(cameraFacing), audio: false });
         const replacement = restored.getVideoTracks()[0];
         if (localStream && callPhase !== 'idle') {
           if (videoSender) await videoSender.replaceTrack(replacement);
