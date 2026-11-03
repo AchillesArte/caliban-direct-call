@@ -93,6 +93,7 @@
   let glassesCanvas = null;
   let glassesStream = null;
   let glassesTrack = null;
+  let glassesFrameRequester = null;
   let phoneCameraTrack = null;
   let glassesFrameBusy = false;
   let glassesFrameLastAt = 0;
@@ -265,6 +266,57 @@
     }
   }
 
+  function createGlassesCanvasTrack() {
+    if (!glassesCanvas || glassesTrack) return;
+    // Where supported, request one encoded frame for each fresh DAT image.
+    // A 30-Hz timer could otherwise sample between 30-Hz native updates and
+    // retain duplicate frames instead of recent source frames.
+    try {
+      const manualStream = glassesCanvas.captureStream(0);
+      const manualTrack = manualStream.getVideoTracks()[0];
+      if (manualTrack && typeof manualTrack.requestFrame === 'function') {
+        glassesStream = manualStream;
+        glassesTrack = manualTrack;
+        glassesFrameRequester = manualTrack;
+      } else {
+        manualStream.getTracks().forEach(track => track.stop());
+      }
+    } catch (_) { /* Older WebKit has no manual canvas frame capture. */ }
+    if (!glassesTrack) {
+      glassesStream = glassesCanvas.captureStream(GLASSES_VIDEO_FPS);
+      glassesTrack = glassesStream.getVideoTracks()[0] || null;
+      glassesFrameRequester = null;
+    }
+    if (!glassesTrack) throw new Error('No video track could be created for the glasses.');
+    glassesTrack.contentHint = 'detail';
+  }
+
+  function requestGlassesFrame() {
+    if (!glassesFrameRequester) return;
+    try {
+      glassesFrameRequester.requestFrame();
+    } catch (_) {
+      // A WebKit implementation can expose requestFrame but disallow it for
+      // the active capture. Keep WebRTC usable through its timed capture path.
+      const old = glassesTrack;
+      const fallbackStream = glassesCanvas.captureStream(GLASSES_VIDEO_FPS);
+      const replacement = fallbackStream.getVideoTracks()[0];
+      if (!replacement) throw new Error('Neither manual nor timed camera capture is supported.');
+      glassesStream = fallbackStream;
+      glassesTrack = replacement;
+      glassesTrack.contentHint = 'detail';
+      glassesFrameRequester = null;
+      if (localStream?.getTracks().includes(old)) {
+        localStream.removeTrack(old);
+        localStream.addTrack(replacement);
+      }
+      if (videoSender?.track === old) void videoSender.replaceTrack(replacement).catch(error => {
+        displayError(`Live camera fallback failed: ${error.message}`);
+      });
+      old?.stop();
+    }
+  }
+
   async function useGlassesTrack() {
     if (!glassesRequested || !glassesTrack || !localStream || callPhase === 'idle' || glassesActive) return;
     const existing = localStream.getVideoTracks()[0] || null;
@@ -413,11 +465,9 @@
           glassesFrameLastAt = Date.now();
           if (!glassesTrack) {
             if (typeof glassesCanvas.captureStream !== 'function') throw new Error('This iOS WebView cannot transmit canvas video.');
-            glassesStream = glassesCanvas.captureStream(GLASSES_VIDEO_FPS);
-            glassesTrack = glassesStream.getVideoTracks()[0] || null;
-            if (!glassesTrack) throw new Error('No video track could be created for the glasses.');
-            glassesTrack.contentHint = 'detail';
+            createGlassesCanvasTrack();
           }
+          requestGlassesFrame();
           if (callPhase !== 'idle' && localStream && !glassesActive && !glassesSwitchQueued) {
             glassesSwitchQueued = true;
             void scheduleGlassesSwitch(useGlassesTrack).finally(() => { glassesSwitchQueued = false; });
@@ -1184,6 +1234,7 @@
     glassesStream?.getTracks().forEach(track => track.stop());
     glassesStream = null;
     glassesTrack = null;
+    glassesFrameRequester = null;
     glassesCanvas = null;
     glassesActive = false;
     ui.cameraSourceLabel.textContent = 'PHONE CAMERA';

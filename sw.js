@@ -1,5 +1,5 @@
 /* Offline app shell only. Calls always require an active secure connection. */
-const CACHE_VERSION = 'caliban-phone-v14';
+const CACHE_VERSION = 'caliban-phone-v15';
 const SHELL = [
   './',
   './index.html',
